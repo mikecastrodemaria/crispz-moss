@@ -99,7 +99,11 @@ Relevé (en-têtes safetensors lus le 03/11/2026) :
 - ConvRot = rotation de Hadamard par groupes de 256 (64 sur la tour vision), matrice
   « regular hadamard » de comfy-kitchen (base H4, produits de Kronecker, PAS Sylvester),
   déjà écrite dans `cz_pipeline._hadamard_ortho` pour FLUX.3 ; `cz_moss` la reprend.
-- Décision : le DiT bf16 et int8 ConvRot et l'encodeur bf16 et int8 ConvRot sont lus
+- Pages communautaires (recherche API CivitAI, 03/11/2026) : la plupart ne publient que
+  l'INT8 ConvRot (5,29 Go), parfois bf16 (9,93 Go), fp8 (cast brut ou « scaled »), INT6,
+  INT4 et Q4 (GGUF). Ce qui se charge ici : bf16, fp8, INT8 ; refusés par nom : INT6,
+  INT4 / w4a8, Q4 GGUF, MXFP8. Réponse à Mike : prendre l'INT8 (ou le bf16 s'il existe).
+- Décision : le DiT bf16, fp8 et int8 ConvRot et l'encodeur bf16 et int8 ConvRot sont lus
   (déquantifiés en bf16 en RAM, `qkv` scindé, préfixe `model.` retiré, `lm_head` et `mtp`
   jetés) ; les formats 4 bits (`asym_w4a8_int8`, `convrot_w4a4`, nvfp4) et 6 bits sont
   refusés PAR LEUR NOM dans le menu, avec l'alternative (le fichier bf16 ou int8 de la

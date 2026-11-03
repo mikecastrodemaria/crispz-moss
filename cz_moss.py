@@ -27,8 +27,9 @@ The upstream pipeline is `third_party/moss_image/pipeline_moss_image.py`, vendor
     editing, and the family detection the LoRA and checkpoint guards rely on.
 
 Single files (ComfyUI / CivitAI layout, `load_transformer(single_file=...)` and
-`load_text_encoder(...)`): the DiT in bf16 or ComfyUI's 'int8_tensorwise' with ConvRot
-(dequantized to bf16 at load time, the fused `proj.qkv` split into q / k / v), the
+`load_text_encoder(...)`): the DiT in bf16, fp8 (plain cast or scaled) or ComfyUI's
+'int8_tensorwise' with ConvRot (dequantized to bf16 at load time, the fused `proj.qkv`
+split into q / k / v), the
 text encoder in bf16 or int8 ConvRot (the `model.` prefix stripped, `lm_head` and the
 `mtp` head dropped). The 4-bit `asym_w4a8_int8` (GPTQ) builds are refused by name.
 """
@@ -958,7 +959,8 @@ def read_single_file(path, dtype=torch.bfloat16, device=None, keep=None):
         if t.dtype in (torch.int8, torch.uint8, torch.float8_e4m3fn, torch.float8_e5m2):
             stem = k[:-len(".weight")] if k.endswith(".weight") else k
             s = raw.get(k + "_scale", raw.get(stem + ".scale_weight"))
-            if s is None:
+            is_fp8 = t.dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+            if s is None and not is_fp8:
                 raise RuntimeError(f"{os.path.basename(path)}: {k} is quantized "
                                    f"({t.dtype}) with no weight_scale next to it")
             cfg = qcfg.get(stem) or {}
@@ -967,16 +969,19 @@ def read_single_file(path, dtype=torch.bfloat16, device=None, keep=None):
                 raise RuntimeError(f"{os.path.basename(path)}: {k} is a '{fmt}' tensor "
                                    f"({REFUSED_FORMATS[fmt]}), no dequantizer here")
             x = t.to(dev).to(torch.float32)
-            sc = s.to(dev).to(torch.float32)
-            if sc.dim() == 2 and sc.shape[0] == x.shape[0] and sc.shape[1] == 1:
-                x = x * sc
-            elif sc.numel() == 1:
-                x = x * sc.reshape(())
-            elif sc.dim() == 1 and sc.numel() == x.shape[0]:
-                x = x * sc.view(-1, 1)
+            if s is None:
+                pass                            # a plain fp8 cast (ComfyUI's e4m3fn files)
             else:
-                raise RuntimeError(f"{os.path.basename(path)}: {k}: weight_scale of shape "
-                                   f"{tuple(sc.shape)} for a weight {tuple(x.shape)}")
+                sc = s.to(dev).to(torch.float32)
+                if sc.dim() == 2 and sc.shape[0] == x.shape[0] and sc.shape[1] == 1:
+                    x = x * sc
+                elif sc.numel() == 1:
+                    x = x * sc.reshape(())
+                elif sc.dim() == 1 and sc.numel() == x.shape[0]:
+                    x = x * sc.view(-1, 1)
+                else:
+                    raise RuntimeError(f"{os.path.basename(path)}: {k}: weight_scale of "
+                                       f"shape {tuple(sc.shape)} for a weight {tuple(x.shape)}")
             if cfg.get("convrot") and x.dim() == 2:
                 x = rotate_convrot(x, int(cfg.get("convrot_groupsize", 256) or 256))
                 n_rot += 1

@@ -235,6 +235,35 @@ def test_comfy_single_file_transformer_reads_back(int8):
     assert loaded.rope.bands.dtype == torch.float32 and loaded.rope.bands.device.type == "cpu"
 
 
+def test_a_plain_fp8_single_file_is_cast_back():
+    """CivitAI's 'fp8' builds: an e4m3fn cast with no weight_scale (the ComfyUI way), or
+    a scaled one. Both read back within fp8 precision; the fused qkv is split too."""
+    from safetensors.torch import save_file
+    tr = tiny_transformer(seed=6)
+    sd = {k: v.detach().clone() for k, v in tr.state_dict().items()}
+    out = {}
+    for k, v in sd.items():
+        if ".proj.q.weight" in k:
+            stem = k[:-len("q.weight")]
+            w = torch.cat([sd[stem + "q.weight"], sd[stem + "k.weight"], sd[stem + "v.weight"]], 0)
+            out[stem + "qkv.weight"] = w.to(torch.float8_e4m3fn)
+        elif ".proj.k.weight" in k or ".proj.v.weight" in k:
+            continue
+        elif k.startswith("layers.") and ".proj." in k:
+            out[k] = v.to(torch.float8_e4m3fn)
+        else:
+            out[k] = v.to(torch.bfloat16) if k != "rope.bands" else v
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "moss_fp8.safetensors")
+        save_file({k: v.contiguous() for k, v in out.items()}, path)
+        assert cz_moss.single_file_refusal(path) is None
+        loaded = cz_moss.load_transformer("unused", torch.bfloat16, single_file=path)
+    for k, v in tr.state_dict().items():
+        a, b = loaded.state_dict()[k].float(), v.float()
+        tol = 0.07 if k.startswith("layers.") and ".proj." in k else 0.01
+        assert (a - b).abs().max() <= tol * b.abs().max() + 1e-3, k
+
+
 def test_comfy_single_file_refusals():
     """A w4a8 GPTQ build and a LoRA are refused by name, before any weight is read."""
     import json
