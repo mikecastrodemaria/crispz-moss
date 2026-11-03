@@ -19,6 +19,20 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   the text encoder (bf16, int8 ConvRot), the 4-bit builds refused by name. Protocol:
   `crispz-moss`, negative on, img2img / inpaint off until lot 3, no cloud. GPU script
   `tools/gpu_lot1_check.py` with the text A/B against the crispz-ideogram posters.
+  Measured on the RTX 5090: 1024 in 42.7 s, 2 Mpx in 102 s, peak 15.7 GB (bf16 encoder
+  offloaded), 21 GB flat with the nf4 encoder; A/B: 24 renders, every requested text
+  exact; in plain text the model may add words it infers from the brief (a misspelt
+  "COFFEE SHOP"), never in a layout.
+- **Lot 2, layout JSON** (2026-11-03): `cz_caption` rewritten for MOSS-Image's layout in
+  its three shapes (editor 0..1000, DRAFT with pixel boxes and the canvas written in,
+  COMPILED centred `yxyx` for the model, the official compiler's arithmetic and checks);
+  the engine compiles a draft at render time and renders at the draft's size. The nine
+  design presets at 0.6 to 1.9 Mpx. The editor keeps its board and form (summary, meta,
+  canvas, palette, items). Magic prompt: Ollama (the official enhancer brief, the draft
+  schema as structured output) or Local (the loaded Qwen3.5-9B with its own LM head,
+  one tensor downloaded once with an HTTP range, outlines JSON guide). Describe (local)
+  reads an image through Qwen3.5's vision tower. The Ideogram cloud code, its tab, its
+  tests, its tool and the vendored Ideogram verifier are removed.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0

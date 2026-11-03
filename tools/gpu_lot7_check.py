@@ -108,7 +108,7 @@ def main():
                   else "a poster")
         _say(f"poster: {hand}")
     else:
-        prompt = cz_caption.to_text(cz_design.caption_of("Poster (A-series, portrait)"))
+        prompt = cz_design.prompt_of("Poster (A-series, portrait)")   # a MOSS layout draft
         poster = _step("0_poster", lambda: P.generate(prompt, 720, 1024, 48, 12345))
         if poster is None:
             sys.exit(1)

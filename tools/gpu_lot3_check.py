@@ -85,7 +85,7 @@ def main():
             if os.path.isfile(os.path.join(ROOT, "bench", "lot2", "hand.json")) else "a poster"
         _say(f"init: {hand}")
     else:
-        prompt = cz_caption.to_text(cz_design.caption_of("Poster (A-series, portrait)"))
+        prompt = cz_design.prompt_of("Poster (A-series, portrait)")   # a MOSS layout draft
         init = _step("0_init", lambda: P.generate(prompt, 720, 1024, steps, 12345))
         if init is None:
             sys.exit(1)

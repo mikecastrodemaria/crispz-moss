@@ -478,6 +478,62 @@ embeddings différents, donc une image nettement différente au même seed (éca
 tant qu'il n'est pas rendu, **bf16 reste le défaut**, nf4 est une option mesurée.
 Le décodage VAE en fp32 coûte environ 5 Go de pic à 1024 dans les deux modes.
 
+### Lot 2 (03/11/2026) : layouts JSON, livré sur `wip/moss-engine`, mesure GPU à faire
+
+- **Trois formes du même layout** dans `cz_caption` (réécrit, plus aucun import du
+  vérificateur Ideogram) : ÉDITEUR (boîtes en 0..1000, ce que manipulent le formulaire et
+  le plateau : un preset ne dépend pas de la taille), DRAFT (la forme lisible du skill
+  officiel : boîtes en pixels `xyxy` depuis le coin haut gauche, `width` / `height`
+  écrits dedans ; c'est ce que « Use as prompt » met dans la boîte de prompt), COMPILÉ
+  (ce que lit le modèle : boîtes centrées `yxyx`, une ligne, sans taille ; même
+  arithmétique que `compile_prompt.py` du skill, vérifiée sur ses nombres publiés).
+  `prepare_prompt` dans `cz_moss` compile le draft au moment du rendu et **force la
+  taille du draft** (une légende vaut pour une taille, dit une fois) ; appelé dans
+  `cz_pipeline._qwen_call` AVANT le cache d'embeddings. Un layout compilé collé à la
+  main passe tel quel (note si ses boîtes dépassent la taille demandée).
+  Validation maison : les contrôles du compilateur officiel + boîte sous 16 px, texte
+  vide. Précision : l'éditeur garde des millièmes, un pixel de jeu au retour.
+- `cz_design` : les 9 presets réécrits (meta, caption résumé avec « no other text »,
+  items), tailles 0,6 à 1,9 Mpx (affiche 1152x1632, logo 1024, carte 1536x992, livre
+  1088x1632, slide 1600x896, packaging 1216, miniature 1280x720, story 1024x1824,
+  bannière 1920x320). Le preset Logo passe par le layout (leçon de l'A/B).
+- `cz_caption_ui` : même plateau et même pont JS, formulaire résumé / meta / canvas /
+  palette / items (label, text, caption, bbox, palette), JSON brut = le draft (un compilé
+  est accepté, la taille des curseurs sert de canevas), « Use as prompt » et « Apply »
+  règlent largeur et hauteur ; Describe règle la taille sur celle de l'image.
+- `cz_magic` : deux moteurs locaux. **Ollama** (défaut) : brief adapté du skill officiel
+  (`SYSTEM`), schéma du draft en `format`, URL loggée à chaque appel. **Local** : le
+  `Qwen3_5Model` déjà chargé devient génératif via `Qwen3_5ForConditionalGeneration`
+  construit sur meta avec l'encodeur partagé (aucune copie) et le `lm_head` de
+  `Qwen/Qwen3.5-9B` : **un seul tenseur** (248320 x 4096, ~2 Go bf16) téléchargé par
+  requête HTTP Range sur le shard 1 (repli : le shard entier), rangé dans
+  `cache/moss/qwen3.5-9b-lm_head.safetensors`. JSON contraint par outlines 1.3
+  (`outlines.from_transformers` + `get_json_schema_logits_processor`, API changée depuis
+  Ideogram), dit une fois sinon ; dynamo coupé sans Triton. Nettoyage commun : think,
+  fences, réponse dessinée pour une autre taille (remise à l'échelle, dit), réponse en
+  millièmes, réponse déjà compilée. Describe local : processeur image de
+  `Qwen/Qwen3.5-9B`, boîtes en pixels de l'image puis draft sur la grille 16.
+  **Non mesuré sur la carte** : l'encodeur nf4 avec le lm_head bf16, la vitesse de
+  génération avec les replis torch (le magic prompt Ideogram prenait 10 à 20 s).
+- **Cloud Ideogram retiré** : `cz_ideogram_api.py`, `cz_cloud_ui.py`,
+  `tests/test_ideogram_api.py`, `tools/api_lot4_check.py`, `third_party/ideogram4`, les
+  clés `ideogram_cloud_*` / `ideogram_api_key`, l'onglet et le bouton Describe cloud.
+  `supports.cloud` reste dans `caps` (contrat de famille), toujours off.
+- Tests : `test_caption.py` (12 : nombres du skill et du guide, aller-retour, refus,
+  presets, `prepare_prompt`, éditeur), `test_magic_prompt.py` (11 : nettoyage, Ollama
+  mocké, plomberie réelle du magic prompt et du Describe sur le MOSS miniature avec une
+  tête aléatoire, téléchargement Range contre un faux serveur, cache, mauvaise taille
+  refusée, outlines), `test_lot2_tools.py` (2). `tools/gpu_lot2_check.py` : layouts à la
+  main (logo + affiche, boîtes dessinées sur les rendus), magic prompt (`--engine`),
+  Describe, `--no-other-text` (8 rendus texte libre avec / sans « No other text. »).
+- Suite complète (`tools/run_tests.py`) : **68 fichiers sur 68 passent** ; smoke 22/22 ;
+  `check_config_keys` (122 clés), `compileall` OK.
+- Vérifié dans Chromium : preset Logo chargé, deux boîtes sur le plateau, « Use as
+  prompt » écrit le draft et sa taille, statut « Layout: valid ».
+- À faire chez Mike : `git pull`, `tools\gpu_lot2_check.py --engine local` (télécharge
+  le lm_head, 2 Go) puis `--engine ollama` si un modèle Ollama est là ; juger les
+  `*_boxes.png` (textes dans les boîtes ?) et les drafts du magic prompt.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

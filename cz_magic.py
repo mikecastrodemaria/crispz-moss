@@ -1,44 +1,40 @@
-"""crispz-ideogram - magic prompt: a plain idea -> an Ideogram 4 JSON caption (lot 2).
+"""crispz-moss - magic prompt: a plain idea -> a MOSS-Image layout draft (lot 2).
 
-Three engines, chosen in the settings (`magic_prompt_engine`):
+Two engines, both on this machine (`magic_prompt_engine`):
 
-  local         (default) Qwen3-VL-8B, the text encoder already loaded, plus its small LM
-                head (diffusers' upsample_prompt). Schema-constrained by `outlines`.
-                Nothing leaves the machine.
-  ollama        a local Ollama model with a system prompt: diffusers' CAPTION_SYSTEM_MESSAGE
-                (default) or Ideogram's open v1 prompt (`magic_prompt_ollama_system` =
-                "ideogram_v1"). The caption schema is passed as Ollama's `format`, so the
-                answer is JSON of the right shape (Ollama >= 0.5). Local too.
-  ideogram_api  Ideogram's hosted magic prompt (api.ideogram.ai, United States). OFF unless
-                `ideogram_cloud_enabled` is true AND an API key is set; every call is logged.
-                Free at the time of writing, but the prompt leaves the machine.
+  ollama   (default) a local Ollama model (`magic_prompt_ollama_model`, else the Improve
+           model, else the first installed) with a system prompt adapted from the official
+           MOSS-Image prompt-enhancer skill, and the draft schema passed as Ollama's
+           structured-output `format` (Ollama >= 0.5), so the answer is JSON of the right
+           shape. Nothing leaves the machine (the Ollama URL is logged on every call).
+  local    the Qwen3.5-9B text encoder already loaded for MOSS-Image, made generative
+           with its own LM head (downloaded once from Qwen/Qwen3.5-9B, ~2 GB, the one
+           tensor only). No second model in VRAM. JSON constrained by `outlines` when
+           installed, said once when it is not.
 
-Every answer goes through the same cleaning: thinking blocks and code fences dropped, the
-outer {...} kept, a top-level "aspect_ratio" removed (Ideogram's v1 prompt emits it), keys
-put in the canonical order, then cz_caption.validate. Returns (caption_text, warnings).
+Every answer goes through the same cleaning: thinking blocks and code fences dropped,
+the outer {...} kept, a draft rebuilt at the asked size (boxes clamped to the canvas,
+labels normalized), then cz_caption.validate. Returns (draft_text, warnings) where
+draft_text is the one-line DRAFT the prompt box takes (cz_caption.to_prompt).
+
+`describe` does the same from an IMAGE with the local engine only (the loaded Qwen3.5's
+vision tower reads the image): summary, meta, every visible text verbatim and a pixel
+box per element.
 """
 
 import json
-import os
 import re
-import urllib.error
-import urllib.request
 
 import cz_caption
 from cz_core import CONFIG, _log, _prefs
 
-ENGINES = ("local", "ollama", "ideogram_api")
-ENGINE_LABELS = {"local": "Local (Qwen3-VL-8B, on this machine)",
-                 "ollama": "Ollama (local LLM)",
-                 "ideogram_api": "Ideogram API (cloud, United States)"}
-IDEOGRAM_MAGIC_PROMPT_URL = "https://api.ideogram.ai/v1/ideogram-v4/magic-prompt"
-OLLAMA_SYSTEMS = ("diffusers", "ideogram_v1")
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_V1_PATH = os.path.join(_HERE, "third_party", "ideogram4", "magic_prompt_v1.txt")
+ENGINES = ("ollama", "local")
+ENGINE_LABELS = {"ollama": "Ollama (local LLM)",
+                 "local": "Local (the loaded Qwen3.5-9B + its LM head, ~2 GB once)"}
 
 
 class MagicPromptError(RuntimeError):
-    """A magic prompt that could not produce a caption, with a message to show as is."""
+    """A magic prompt that could not produce a layout, with a message to show as is."""
 
 
 def _setting(key, default=None):
@@ -48,59 +44,72 @@ def _setting(key, default=None):
     return default if v is None else v
 
 
-_ENGINE_FALLBACK_SAID = set()
+def engine():
+    e = _setting("magic_prompt_engine", CONFIG.get("magic_prompt_engine", "ollama"))
+    e = str(e or "ollama").strip().lower()
+    return e if e in ENGINES else "ollama"
 
 
 def visible_engines():
-    """The engines the UI offers: the cloud one only while `ideogram_cloud_enabled` is
-    true (Mike's choice, 02/11/2026: local only, the cloud stays in the code, hidden)."""
-    return tuple(e for e in ENGINES if e != "ideogram_api" or cloud_enabled())
+    return ENGINES
 
 
-def engine():
-    e = _setting("magic_prompt_engine", CONFIG.get("magic_prompt_engine", "local"))
-    e = str(e or "local").strip().lower()
-    if e not in ENGINES:
-        return "local"
-    if e not in visible_engines():
-        if e not in _ENGINE_FALLBACK_SAID:
-            _ENGINE_FALLBACK_SAID.add(e)
-            _log(f"magic prompt engine '{e}' needs the Ideogram cloud, which is off "
-                 f"(`ideogram_cloud_enabled`: false): the local engine is used instead")
-        return "local"
-    return e
+# --- The brief the LLM gets (adapted from skills/moss-image-prompt-enhancer, Apache 2.0) -
+SYSTEM = """You are a prompt enhancer for MOSS-Image, a text-to-image model that renders text exactly and places elements where a layout says. Turn the user's idea into a LAYOUT DRAFT: one JSON object and nothing else.
 
+Schema (every field below, no other):
+{"width": W, "height": H, "bbox_coord_space": "abs", "bbox_format": "xyxy",
+ "summary": {"meta": ["poster"], "canvas": "single", "caption": "...", "palette": ["#RRGGBB"]},
+ "items": [{"label": "text", "caption": "...", "text": "EXACT WORDS", "bbox": [x1, y1, x2, y2]},
+           {"label": "object", "caption": "...", "bbox": [x1, y1, x2, y2]}]}
 
-def cloud_enabled():
-    return bool(_setting("ideogram_cloud_enabled",
-                         CONFIG.get("ideogram_cloud_enabled", False)))
+Rules:
+- width and height are the ones given; bbox = [x_min, y_min, x_max, y_max] in PIXELS from the top-left, inside the canvas, x_min < x_max, y_min < y_max. Never normalized values.
+- summary.caption: cohesive prose describing the whole image: subject, setting, medium, style, lighting, materials, palette, mood, and the global typographic treatment. Say "no other text" when the design should carry only the listed texts.
+- summary.meta: one or two genre tags (poster, logo, business card, book cover, slide, packaging, thumbnail, social media, banner, product campaign, illustration...). summary.canvas is "single" unless the idea asks for panels or a collage.
+- items: one per coherent visible unit. label is "text", "object" or "character". Each caption describes that element's appearance; for a text item also its typography (weight, case, colour, alignment). A text item's "text" holds the exact visible characters, in the user's language, punctuation and capitalization kept, "\\n" for an intended line break. Write the real copy the design needs, never placeholders.
+- Preserve the user's subjects, counts, wording and exclusions. Do not invent event dates, prices or addresses the user did not give. Keep boxes large enough for the text to be readable at the canvas size, and leave margins.
+- Describe in English unless the user writes in another language for the visible text; the visible text stays in its language.
+Output the JSON object only: no markdown fence, no explanation."""
 
+USER_TEMPLATE = ("Canvas: {width} x {height} pixels (aspect ratio {aspect}).\n"
+                 "Idea: {idea}")
 
-def api_key():
-    key = os.environ.get("IDEOGRAM_API_KEY") or _setting(
-        "ideogram_api_key", CONFIG.get("ideogram_api_key", ""))
-    return (key or "").strip()
-
-
-def cloud_status():
-    """(usable, reason): the Ideogram API is usable only when both switches are on."""
-    if not cloud_enabled():
-        return False, ("Ideogram cloud functions are off (`ideogram_cloud_enabled`: false). "
-                       "They send your prompts and images to api.ideogram.ai, in the "
-                       "United States.")
-    if not api_key():
-        return False, "No Ideogram API key (`ideogram_api_key` or env IDEOGRAM_API_KEY)."
-    return True, ("Ideogram cloud on: what a Cloud button sends goes to api.ideogram.ai "
-                  "(United States).")
+# The shape Ollama is asked to produce (its structured-output `format`).
+OLLAMA_FORMAT = {
+    "type": "object",
+    "properties": {
+        "width": {"type": "integer"}, "height": {"type": "integer"},
+        "bbox_coord_space": {"type": "string", "enum": ["abs"]},
+        "bbox_format": {"type": "string", "enum": ["xyxy"]},
+        "summary": {"type": "object",
+                    "properties": {"meta": {"type": "array", "items": {"type": "string"}},
+                                   "canvas": {"type": "string",
+                                              "enum": list(cz_caption.CANVASES)},
+                                   "caption": {"type": "string"},
+                                   "palette": {"type": "array", "items": {"type": "string"}}},
+                    "required": ["caption"]},
+        "items": {"type": "array", "minItems": 1, "items": {
+            "type": "object",
+            "properties": {"label": {"type": "string", "enum": list(cz_caption.LABELS)},
+                           "caption": {"type": "string"},
+                           "text": {"type": "string"},
+                           "bbox": {"type": "array", "minItems": 4, "maxItems": 4,
+                                    "items": {"type": "number"}}},
+            "required": ["label", "caption", "bbox"]}}},
+    "required": ["summary", "items"]}
 
 
 # --- Cleaning ------------------------------------------------------------------------
 _FENCE_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*|\s*```$")
 
 
-def clean(raw, strip_bboxes=False):
-    """Raw model text -> (caption_text, warnings). Raises MagicPromptError when no JSON
-    object can be read from it (the excerpt is in the message)."""
+def clean(raw, width, height, validate=True):
+    """Raw model text -> (draft_text, warnings). The JSON object is read out of the
+    answer (thinking, fences and prose around it dropped), the boxes are taken as
+    PIXELS of a width x height canvas (an answer that drew them for another canvas, or
+    in 0..1000, is rescaled to fit: said in the warnings), labels and keys normalized.
+    Raises MagicPromptError when no JSON object can be read."""
     import prompt_improve
     text = prompt_improve.strip_thinking(raw or "").strip()
     text = _FENCE_RE.sub("", text).strip()
@@ -108,88 +117,50 @@ def clean(raw, strip_bboxes=False):
     if a < 0 or b <= a:
         raise MagicPromptError(f"the magic prompt returned no JSON object: {text[:160]!r}")
     try:
-        cap = cz_caption.parse(text[a:b + 1])
+        d = cz_caption.parse(text[a:b + 1])
     except ValueError as e:
         raise MagicPromptError(f"the magic prompt returned invalid JSON ({e}): "
                                f"{text[a:a + 160]!r}")
-    cap.pop("aspect_ratio", None)
-    for el in (cap.get("compositional_deconstruction") or {}).get("elements") or []:
-        if isinstance(el, dict) and "bbox_2d" in el:
-            # Qwen3-VL's grounding order [x1, y1, x2, y2] -> Ideogram's [y0, x0, y1, x1].
-            b = cz_caption.parse_bbox(el.pop("bbox_2d"))
-            if b:
-                x1, y1, x2, y2 = b
-                el["bbox"] = [min(y1, y2), min(x1, x2), max(y1, y2), max(x1, x2)]
-    if strip_bboxes:
-        for el in (cap.get("compositional_deconstruction") or {}).get("elements") or []:
-            if isinstance(el, dict):
-                el.pop("bbox", None)
-    cz_caption.reorder_keys(cap)
-    return cz_caption.to_text(cap), cz_caption.validate(cap)
+    if "items" not in d:
+        raise MagicPromptError("the magic prompt returned no 'items': "
+                               f"{text[a:a + 160]!r}")
+    d.setdefault("summary", {"caption": ""})
+    w, h = int(width), int(height)
+    warnings = []
+    # The canvas the answer drew for: the one asked, unless it says otherwise or its
+    # boxes overflow (an LLM that ignored the size, or answered in 0..1000).
+    try:
+        dw, dh = int(d.get("width") or w), int(d.get("height") or h)
+    except (TypeError, ValueError):
+        dw, dh = w, h
+    boxes = [it.get("bbox") for it in d["items"] if isinstance(it, dict)
+             and isinstance(it.get("bbox"), list) and len(it["bbox"]) == 4]
+    mx = max((float(v) for bx in boxes for v in bx[0::2] if isinstance(v, (int, float))),
+             default=0)
+    my = max((float(v) for bx in boxes for v in bx[1::2] if isinstance(v, (int, float))),
+             default=0)
+    if d.get("bbox_coord_space") == "abs_centralized":
+        lay, _, _ = cz_caption.from_text(d, w, h)
+        warnings.append("the answer came compiled (centred boxes): read back as such")
+    else:
+        if (dw, dh) != (w, h):
+            warnings.append(f"the answer drew its boxes for {dw}x{dh}: rescaled to {w}x{h}")
+        elif boxes and "width" not in d and mx <= 1000 and my <= 1000 and (mx > w or my > h):
+            dw, dh = 1000, 1000
+            warnings.append("the answer used 0..1000 boxes: read as thousandths")
+        d["width"], d["height"] = dw, dh
+        d["bbox_coord_space"], d["bbox_format"] = "abs", "xyxy"
+        lay, _, _ = cz_caption.from_text(d, dw, dh)
+    text_out = cz_caption.to_prompt(lay, w, h)
+    return text_out, warnings + (cz_caption.validate(text_out) if validate else [])
 
 
 # --- Engines -------------------------------------------------------------------------
-def _local(prompt, width, height, seed):
-    import cz_pipeline
-    return cz_pipeline.magic_prompt_local(prompt, width, height, seed=seed)
-
-
-def _diffusers_messages(prompt, aspect):
-    from diffusers.pipelines.ideogram4.prompt_enhancer import (CAPTION_SYSTEM_MESSAGE,
-                                                                CAPTION_USER_TEMPLATE)
-    return CAPTION_SYSTEM_MESSAGE, CAPTION_USER_TEMPLATE.format(aspect_ratio=aspect,
-                                                                original_prompt=prompt)
-
-
-def _v1_messages(prompt, aspect):
-    """Ideogram's open v1 system prompt ([SYSTEM] / [USER] sections, Apache-2.0)."""
-    with open(_V1_PATH, encoding="utf-8") as f:
-        raw = f.read()
-    sections, cur, buf = {}, None, []
-    for line in raw.splitlines():
-        s = line.strip()
-        if s.startswith("[") and s.endswith("]") and " " not in s:
-            if cur:
-                sections[cur] = "\n".join(buf).strip()
-            cur, buf = s[1:-1].lower(), []
-        else:
-            buf.append(line)
-    if cur:
-        sections[cur] = "\n".join(buf).strip()
-    user = sections.get("user", "TARGET IMAGE ASPECT RATIO: {{aspect_ratio}} (width:height).\n"
-                                "User idea: {{original_prompt}}")
-    user = user.replace("{{aspect_ratio}}", aspect).replace("{{original_prompt}}", prompt)
-    return sections["system"], user
-
-
-# The shape Ollama is asked to produce (its structured-output `format`): the schema the
-# diffusers enhancer constrains to, plus the optional style block.
-OLLAMA_FORMAT = {
-    "type": "object",
-    "properties": {
-        "high_level_description": {"type": "string"},
-        "compositional_deconstruction": {
-            "type": "object",
-            "properties": {
-                "background": {"type": "string"},
-                "elements": {"type": "array", "minItems": 1, "items": {
-                    "type": "object",
-                    "properties": {"type": {"type": "string", "enum": ["obj", "text"]},
-                                   "text": {"type": "string"},
-                                   "desc": {"type": "string"}},
-                    "required": ["type", "desc"]}}},
-            "required": ["background", "elements"]}},
-    "required": ["high_level_description", "compositional_deconstruction"]}
-
-
-def _ollama(prompt, width, height, seed, model=None):
+def _ollama(idea, width, height, seed, model=None):
     import cz_ollama
     import prompt_improve
     aspect = cz_caption.aspect_ratio(width, height)
-    which = _setting("magic_prompt_ollama_system",
-                     CONFIG.get("magic_prompt_ollama_system", "diffusers"))
-    which = str(which or "diffusers")
-    system, user = (_v1_messages if which == "ideogram_v1" else _diffusers_messages)(prompt, aspect)
+    user = USER_TEMPLATE.format(width=int(width), height=int(height), aspect=aspect, idea=idea)
     model = model or _setting("magic_prompt_ollama_model",
                               CONFIG.get("magic_prompt_ollama_model", "")) or None
     base = cz_ollama._improve_base()
@@ -198,90 +169,75 @@ def _ollama(prompt, width, height, seed, model=None):
         if not models:
             raise MagicPromptError("Ollama: no model installed (ollama pull <model>)")
         model = models[0]
-    payload = {"model": model, "system": system, "prompt": user,
+    payload = {"model": model, "system": SYSTEM, "prompt": user,
                **cz_ollama._ollama_gen_opts(temperature=_setting(
                    "magic_prompt_temperature", CONFIG.get("magic_prompt_temperature", 0.7)))}
     opts = payload.setdefault("options", {})
     opts["num_predict"] = max(int(opts.get("num_predict") or 0), 2048)
     if seed is not None and int(seed) >= 0:
         opts["seed"] = int(seed)
-    if which != "ideogram_v1":
-        payload["format"] = OLLAMA_FORMAT     # v1 adds keys of its own: left free
+    payload["format"] = OLLAMA_FORMAT
+    _log(f"magic prompt (ollama, {model}, {base}): sending the idea, {int(width)}x{int(height)}")
     try:
         out = prompt_improve.http("/api/generate", payload, base=base, timeout=300)
     except Exception as e:
         raise MagicPromptError(f"Ollama ({model}): {e}")
-    _log(f"magic prompt (ollama, {model}, system {which}) done")
     return out.get("response") or ""
 
 
-def _ideogram_api(prompt, width, height, seed):
-    ok, why = cloud_status()
-    if not ok:
-        raise MagicPromptError(why)
-    aspect = cz_caption.aspect_ratio(width, height).replace(":", "x")
-    _log(f"CLOUD: magic prompt sent to api.ideogram.ai (United States), "
-         f"{len(prompt)} characters, aspect {aspect}")
-    body = json.dumps({"text_prompt": prompt, "aspect_ratio": aspect}).encode("utf-8")
-    req = urllib.request.Request(IDEOGRAM_MAGIC_PROMPT_URL, data=body, method="POST",
-                                 headers={"Api-Key": api_key(),
-                                          "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            data = json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:200]
-        raise MagicPromptError(f"Ideogram API: HTTP {e.code} {detail}")
-    except Exception as e:
-        raise MagicPromptError(f"Ideogram API unreachable: {e}")
-    jp = data.get("json_prompt")
-    if not jp:
-        raise MagicPromptError(f"Ideogram API returned no json_prompt: {str(data)[:200]}")
-    return json.dumps(jp, ensure_ascii=False)
+def _local(idea, width, height, seed):
+    import cz_pipeline
+    return cz_pipeline.magic_prompt_local(idea, width, height, seed=seed)
 
 
-def expand(prompt, width, height, seed=None, which=None, model=None):
-    """A plain idea -> (caption_text, warnings, engine_used). Raises MagicPromptError."""
-    prompt = (prompt or "").strip()
-    if not prompt:
+def messages_for(idea, width, height):
+    """(system, user) for the local engine (the same brief as Ollama's)."""
+    aspect = cz_caption.aspect_ratio(width, height)
+    return SYSTEM, USER_TEMPLATE.format(width=int(width), height=int(height),
+                                        aspect=aspect, idea=idea)
+
+
+def expand(idea, width, height, seed=None, which=None, model=None):
+    """A plain idea -> (draft_text, warnings, engine_used). Raises MagicPromptError."""
+    idea = (idea or "").strip()
+    if not idea:
         raise MagicPromptError("nothing to expand: the prompt is empty")
-    if cz_caption.is_caption(prompt):
-        raise MagicPromptError("the prompt is already a JSON caption")
+    if cz_caption.is_caption(idea):
+        raise MagicPromptError("the prompt is already a layout JSON")
     which = which or engine()
-    if which == "ollama":
-        raw = _ollama(prompt, width, height, seed, model=model)
-    elif which == "ideogram_api":
-        raw = _ideogram_api(prompt, width, height, seed)
+    if which == "local":
+        raw = _local(idea, width, height, seed)
     else:
-        which = "local"
-        raw = _local(prompt, width, height, seed)
-    # Ideogram's own magic prompts drop the LLM's boxes by default (strip_bboxes=True):
-    # we keep the API's (it is their model) and drop none of the local ones (the local
-    # schemas carry no box anyway).
-    text, warnings = clean(raw)
+        which = "ollama"
+        raw = _ollama(idea, width, height, seed, model=model)
+    text, warnings = clean(raw, width, height)
     if warnings:
-        _log(f"magic prompt ({which}): {len(warnings)} schema warning(s): "
-             + "; ".join(warnings[:3]))
+        _log(f"magic prompt ({which}): {len(warnings)} note(s): " + "; ".join(warnings[:3]))
     return text, warnings, which
 
 
+DESCRIBE_SYSTEM = """You describe an image as a MOSS-Image LAYOUT DRAFT that a renderer could use to recreate it. Output ONE JSON object and nothing else:
+{"summary": {"meta": [...], "canvas": "single", "caption": "...", "palette": ["#RRGGBB"]},
+ "items": [{"label": "text", "caption": "...", "text": "VERBATIM", "bbox": [x1, y1, x2, y2]},
+           {"label": "object", "caption": "...", "bbox": [x1, y1, x2, y2]}]}
+Rules: bbox in PIXELS of the image ({width} x {height}), [x_min, y_min, x_max, y_max] from the top-left. Transcribe EVERY visible text exactly, one text item per block, line breaks as \\n, and describe its typography in the caption. One object or character item per main visible thing, 10 to 40 words each, concrete (shape, colour, material, position). summary.caption describes the whole image: subject, medium, style, lighting, palette, mood. palette: 3 to 8 dominant colours as #RRGGBB. Valid JSON only: double quotes, no trailing commas, no markdown."""
+
+
 def describe(image, which="local"):
-    """An image -> (caption_text, warnings). `which` = "local" (the loaded Qwen3-VL-8B,
-    nothing leaves the machine) or "ideogram_api" (Ideogram's Describe 4.0, CLOUD: the
-    image goes to the United States; same switches as the other cloud functions)."""
+    """An image -> (draft_text, warnings) with the loaded Qwen3.5-9B (vision tower and
+    LM head), on this machine. The draft's canvas is the image's size on the 16 grid."""
     if image is None:
         raise MagicPromptError("no image to describe")
-    if which == "ideogram_api":
-        import cz_ideogram_api as api
-        try:
-            raw = api.run(api.build_describe(image)).caption
-        except api.CloudError as e:
-            raise MagicPromptError(str(e))
-    else:
-        import cz_pipeline
-        raw = cz_pipeline.describe_local(image)
-    text, warnings = clean(raw)
+    import cz_pipeline
+    raw = cz_pipeline.describe_local(image)
+    # The boxes come in pixels of the image as shown to the model; the draft is written
+    # on the 16 grid (what MOSS renders), the boxes rescaled with it.
+    text, warnings = clean(raw, image.width, image.height, validate=False)
+    w, h = cz_caption.fit_grid(image.width, image.height)
+    if (w, h) != (image.width, image.height):
+        lay, _, _ = cz_caption.from_text(text)
+        text = cz_caption.to_prompt(lay, w, h)
+    warnings += cz_caption.validate(text)
     if warnings:
-        _log(f"describe: {len(warnings)} schema warning(s): " + "; ".join(warnings[:3]))
+        _log(f"describe: {len(warnings)} note(s): " + "; ".join(warnings[:3]))
     return text, warnings
-

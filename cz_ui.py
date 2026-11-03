@@ -4556,14 +4556,6 @@ def build_ui():
                             vec_file = gr.File(label="SVG file", interactive=False)
                             vec_status = gr.Markdown("")
 
-                        # The Ideogram cloud tab exists only while ideogram_cloud_enabled
-                        # is true (read at startup): this studio is used locally, the
-                        # cloud code stays, hidden (Mike, 02/11/2026).
-                        import cz_cloud_ui
-                        import cz_magic as _czm
-                        with gr.Tab("Cloud (Ideogram)", visible=_czm.cloud_enabled()):
-                            cloud_panel = cz_cloud_ui.build_tab()
-
                         with gr.Tab("Inpaint / Outpaint"):
                             gr.Markdown("*Ideogram 4 has no native img2img or inpaint: crispz-ideogram EMULATES them (SDEdit on the tail of its own schedule; latent blending under the mask). Denoise = the fraction of the steps that runs.*")
                             gr.Markdown("*One editor for everything: **Brush** = inpaint the painted "
@@ -5462,9 +5454,6 @@ def build_ui():
         ho_save.click(_ho_save, [ho_dir], [ho_status, ho_btn])
         vec_btn.click(_ui_vectorize, [vec_img, vec_preset, vec_colors, vec_rembg, save_mode,
                                       output_dir], [vec_preview, vec_file, vec_status])
-        cz_cloud_ui.wire(cloud_panel, prompt, width, height, save_mode, output_dir,
-                         output_format, history, out, report, history_gallery,
-                         extra_buttons=[caption_panel["describe_cloud_btn"]], demo=demo)
         faceswap_restore_cb.change(set_faceswap_restore,
                                    [faceswap_restore_cb, faceswap_restore_blend],
                                    [faceswap_restore_status])

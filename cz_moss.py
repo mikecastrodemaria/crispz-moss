@@ -76,6 +76,16 @@ MIN_SIDE, MAX_SIDE, GRID = 256, 2048, 16
 MAX_PIXELS = 2048 * 2048
 VALIDATED_MIN_PIXELS = 512 * 512
 
+# The local magic prompt / Describe (lot 2): the text encoder IS a frozen Qwen3.5-9B, so
+# its own LM head (one tensor, vocab 248320 x 4096, ~2 GB in bf16) makes it generative
+# again. Downloaded once, the tensor alone (an HTTP range on the shard), into cache/.
+LM_HEAD_REPO = "Qwen/Qwen3.5-9B"
+LM_HEAD_KEY = "lm_head.weight"
+LM_HEAD_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "moss",
+                             "qwen3.5-9b-lm_head.safetensors")
+MAGIC_MAX_NEW_TOKENS = 1536
+DESCRIBE_MAX_SIDE = 1024
+
 # Offload 'auto': below this much VRAM, 'none' is turned into 'model' (= the text encoder
 # alone off the card, see MossPipe.enable_model_cpu_offload). bf16 everything is 27 GB of
 # weights: on a 32 GB card the encoder has to leave between prompts.
@@ -396,6 +406,36 @@ def native_sigmas(steps, scheduler=None):
     return s[:-1] if s and s[-1] == 0.0 else s
 
 
+# --- Layout prompts (lot 2) ------------------------------------------------------------
+def prepare_prompt(prompt, width=None, height=None):
+    """What the model gets from a prompt string, and the size to render at:
+    (prompt, width, height, note). A layout DRAFT (cz_caption: pixel boxes and its own
+    canvas) is compiled to the model form and FORCES the size it was drawn for (a layout
+    is worth one size); a COMPILED layout or plain text go through as they are. The note
+    (or None) is what the caller logs."""
+    if not isinstance(prompt, str):
+        return prompt, width, height, None
+    try:
+        import cz_caption
+    except Exception:
+        return prompt, width, height, None
+    if not cz_caption.is_caption(prompt):
+        return prompt, width, height, None
+    d = cz_caption.parse(prompt)
+    if cz_caption.is_compiled(d):
+        gw, gh = cz_caption.guess_canvas(d)
+        if width and height and (gw > int(width) or gh > int(height)):
+            return prompt, width, height, (f"layout: its boxes reach {gw}x{gh}, beyond the "
+                                           f"{width}x{height} asked (drawn for a larger canvas?)")
+        return prompt, width, height, None
+    compiled, dw, dh = cz_caption.compile(d)
+    note = None
+    if width and height and (int(width), int(height)) != (dw, dh):
+        note = (f"layout drawn for {dw}x{dh}: rendering at that size, not at "
+                f"{int(width)}x{int(height)} (a layout is worth one size)")
+    return compiled, dw, dh, note
+
+
 # --- The adapter -------------------------------------------------------------------------
 class MossPipe:
     """A MossPipeline behind crispz's calling convention. Unknown attributes are forwarded
@@ -403,7 +443,8 @@ class MossPipe:
     maybe_free_model_hooks...)."""
 
     _OWN = {"_pipe", "repo", "variant", "_said", "_cfg", "_all_hooks", "_tr_pre",
-            "_te_on_gpu", "_offload_device", "released", "_neg_cache", "skip_layers"}
+            "_te_on_gpu", "_offload_device", "released", "_neg_cache", "skip_layers",
+            "_generator", "_lm_head", "_vl_processor"}
 
     def __init__(self, pipe, repo=DEFAULT_REPO):
         object.__setattr__(self, "_pipe", pipe)
@@ -412,7 +453,8 @@ class MossPipe:
         object.__setattr__(self, "_said", set())
         # is_distilled False: a real CFG and a real negative prompt (cz_pipeline reads it).
         object.__setattr__(self, "_cfg", {"is_distilled": False})
-        for k in ("_tr_pre", "_offload_device", "_neg_cache"):
+        for k in ("_tr_pre", "_offload_device", "_neg_cache", "_generator", "_lm_head",
+                  "_vl_processor"):
             object.__setattr__(self, k, None)
         object.__setattr__(self, "_all_hooks", [])
         object.__setattr__(self, "_te_on_gpu", False)
@@ -427,6 +469,8 @@ class MossPipe:
         object.__setattr__(self, "released", True)
         object.__setattr__(self, "_all_hooks", [])
         object.__setattr__(self, "_neg_cache", None)
+        for k in ("_generator", "_lm_head", "_vl_processor"):
+            object.__setattr__(self, k, None)
 
     def __getattr__(self, name):
         inner = object.__getattribute__(self, "_pipe")
@@ -581,6 +625,138 @@ class MossPipe:
                            f"transformer has {n} blocks")
         return ok
 
+    # --- Local magic prompt and Describe (lot 2) -------------------------------------------
+    def ensure_lm_head(self, token=None, repo=LM_HEAD_REPO, cache=LM_HEAD_CACHE):
+        """The LM head tensor (vocab x hidden) of the encoder's own Qwen3.5-9B, loaded
+        once: from cache/moss/, else downloaded (the one tensor, ~2 GB, said)."""
+        if self._lm_head is not None:
+            return self._lm_head
+        te = self._pipe.text_encoder
+        hidden = int(te.config.text_config.hidden_size)
+        vocab = int(te.config.text_config.vocab_size)
+        w = load_lm_head(cache) if os.path.isfile(cache) else None
+        if w is None:
+            _log(f"magic prompt: downloading the LM head of {repo} ({LM_HEAD_KEY}, ~2 GB, "
+                 f"once) to {cache}")
+            download_lm_head(repo, cache, token=token)
+            w = load_lm_head(cache)
+        if tuple(w.shape) != (vocab, hidden):
+            raise RuntimeError(f"LM head {tuple(w.shape)} does not fit this encoder "
+                               f"({vocab} x {hidden}): a replacement encoder of another "
+                               f"size? Delete {cache} to download {repo}'s again")
+        object.__setattr__(self, "_lm_head", w)
+        return w
+
+    def set_lm_head(self, weight):
+        """A head handed in directly (tests: a tiny random one)."""
+        object.__setattr__(self, "_lm_head", weight)
+        object.__setattr__(self, "_generator", None)
+
+    def _get_generator(self):
+        """Qwen3_5ForConditionalGeneration sharing the loaded encoder as its `model`
+        (no second copy of the 9B), with the LM head on top. Built once."""
+        if self._generator is not None:
+            return self._generator
+        from transformers import Qwen3_5ForConditionalGeneration
+        te = self._pipe.text_encoder
+        head_w = self.ensure_lm_head()
+        with torch.device("meta"):
+            gen = Qwen3_5ForConditionalGeneration(te.config)
+        gen.model = te
+        dt = next(p for p in te.parameters()).dtype
+        if dt not in (torch.bfloat16, torch.float16, torch.float32):
+            dt = torch.bfloat16                 # a quantized encoder: the head in bf16
+        head = torch.nn.Linear(head_w.shape[1], head_w.shape[0], bias=False,
+                               device="cpu", dtype=dt)
+        with torch.no_grad():
+            head.weight.copy_(head_w.to(dt))
+        gen.lm_head = head
+        gen.eval()
+        try:
+            gen.generation_config.pad_token_id = self._pipe.tokenizer.pad_token_id
+        except Exception:
+            pass
+        object.__setattr__(self, "_generator", gen)
+        return gen
+
+    def _processor(self):
+        """Qwen3.5's image + text processor (small config files from LM_HEAD_REPO)."""
+        proc = self.__dict__.get("_vl_processor")
+        if proc is None:
+            from transformers import AutoProcessor
+            proc = AutoProcessor.from_pretrained(LM_HEAD_REPO)
+            object.__setattr__(self, "_vl_processor", proc)
+        return proc
+
+    def _device_for_generation(self, device=None):
+        return self._offload_device or device or self._pipe._execution_device
+
+    def _generate_text(self, inputs, max_new_tokens, do_sample=False, temperature=0.7,
+                       seed=None, device=None, schema=None):
+        """Runs the generator on tokenized `inputs` (a BatchEncoding / dict), the
+        encoder and the head brought onto the card for the call under the encoder-only
+        offload and sent back after. `schema` (a JSON schema dict) constrains the output
+        with outlines when it is installed; said once when it is not."""
+        gen = self._get_generator()
+        dev = self._device_for_generation(device)
+        offloaded = self._offload_device is not None
+        self._encoder_in()
+        gen.lm_head.to(dev)
+        try:
+            inputs = {k: (v.to(dev) if hasattr(v, "to") else v) for k, v in inputs.items()}
+            if seed is not None and int(seed) >= 0:
+                torch.manual_seed(int(seed))
+            kw = {"max_new_tokens": int(max_new_tokens), "do_sample": bool(do_sample)}
+            if do_sample:
+                kw["temperature"] = float(temperature)
+            with torch.no_grad(), _no_compile_without_triton():
+                processors = (_schema_processors(gen, self._pipe.tokenizer, schema)
+                              if schema else None)
+                if processors:
+                    kw["logits_processor"] = processors
+                out = gen.generate(**inputs, **kw)
+            new = out[:, inputs["input_ids"].shape[1]:]
+            return self._pipe.tokenizer.batch_decode(new, skip_special_tokens=True)[0].strip()
+        finally:
+            if offloaded:
+                gen.lm_head.to("cpu")
+                self._encoder_out()
+
+    def magic_prompt(self, idea, width, height, seed=None, temperature=0.7,
+                     max_new_tokens=MAGIC_MAX_NEW_TOKENS, device=None, constrained=True):
+        """Plain idea -> a layout draft text, locally, with the encoder and its LM head
+        (cz_magic cleans and validates it)."""
+        import cz_magic
+        system, user = cz_magic.messages_for(idea, width, height)
+        tok = self._pipe.tokenizer
+        text = tok.apply_chat_template(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            tokenize=False, add_generation_prompt=True, enable_thinking=False)
+        inputs = tok(text, return_tensors="pt")
+        return self._generate_text(inputs, max_new_tokens, do_sample=temperature > 0,
+                                   temperature=temperature, seed=seed, device=device,
+                                   schema=cz_magic.OLLAMA_FORMAT if constrained else None)
+
+    def describe_image(self, image, max_new_tokens=MAGIC_MAX_NEW_TOKENS, device=None):
+        """An image -> a layout draft text (boxes in pixels of the image), with the
+        loaded Qwen3.5-9B: its vision tower and the LM head. Greedy: deterministic."""
+        import cz_magic
+        proc = self._processor()
+        img = image.convert("RGB")
+        if max(img.size) > DESCRIBE_MAX_SIDE:
+            k = DESCRIBE_MAX_SIDE / float(max(img.size))
+            img = img.resize((max(32, round(img.width * k)), max(32, round(img.height * k))))
+        system = (cz_magic.DESCRIBE_SYSTEM.replace("{width}", str(image.width))
+                  .replace("{height}", str(image.height)))
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": system}]},
+            {"role": "user", "content": [
+                {"type": "image", "image": img},
+                {"type": "text", "text": "Describe this image as the layout draft."}]}]
+        inputs = proc.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
+                                          return_dict=True, return_tensors="pt")
+        return self._generate_text(inputs, max_new_tokens, do_sample=False, device=device)
+
     def __call__(self, prompt=None, image=None, mask_image=None, strength=None,
                  width=None, height=None, num_inference_steps=None, generator=None,
                  guidance_scale=None, num_images_per_prompt=1, negative_prompt=None,
@@ -597,6 +773,10 @@ class MossPipe:
             raise NotImplementedError(
                 "MOSS-Image does not edit images (text to image only). Local editing: send "
                 "the image to crispz-flux3 (Edit in crispz-flux3 tab).")
+        if isinstance(prompt, str):
+            prompt, width, height, note = prepare_prompt(prompt, width, height)
+            if note:
+                self._say_once(("layout", note), note)
         steps = int(num_inference_steps or DEFAULTS["moss"]["steps"])
         w, h = fit_size(width, height)
         if (width and height) and (w, h) != (int(width), int(height)):
@@ -659,6 +839,116 @@ def _is_quantized(module):
     return bool(getattr(module, "is_loaded_in_4bit", False)
                 or getattr(module, "is_loaded_in_8bit", False)
                 or getattr(module, "hf_quantizer", None) is not None)
+
+
+def _no_compile_without_triton():
+    """outlines-core wraps its logits-mask kernel in torch.compile, which needs Triton;
+    on Windows there is none, so every constrained generation printed two pages of
+    TritonMissing traceback before PyTorch fell back to eager (seen on crispz-ideogram).
+    Without Triton, dynamo is switched off for the call."""
+    import contextlib
+    import importlib.util
+    if importlib.util.find_spec("triton") is not None:
+        return contextlib.nullcontext()
+    import torch._dynamo
+    return torch._dynamo.config.patch(disable=True)
+
+
+_OUTLINES_SAID = set()
+
+
+def _schema_processors(model, tokenizer, schema):
+    """A transformers LogitsProcessorList that constrains the output to `schema`
+    (outlines 1.x: its outlines-core JSON-schema guide, built for this tokenizer), or
+    None when outlines is not installed (said once) or refuses the tokenizer."""
+    try:
+        import outlines
+        from outlines.backends import get_json_schema_logits_processor
+        from transformers import LogitsProcessorList
+    except Exception as e:
+        if "outlines" not in _OUTLINES_SAID:
+            _OUTLINES_SAID.add("outlines")
+            _log(f"magic prompt: `outlines` is not usable ({type(e).__name__}: {e}), the "
+                 f"local engine runs unconstrained and may return invalid JSON")
+        return None
+    try:
+        om = outlines.from_transformers(model, tokenizer)
+        proc = get_json_schema_logits_processor(None, om, json.dumps(schema))
+        proc.reset()
+        return LogitsProcessorList([proc])
+    except Exception as e:
+        if "guide" not in _OUTLINES_SAID:
+            _OUTLINES_SAID.add("guide")
+            _log(f"magic prompt: outlines could not build the JSON guide "
+                 f"({type(e).__name__}: {e}); unconstrained")
+        return None
+
+
+def load_lm_head(path):
+    """The LM head tensor from a one-tensor safetensors (cache), or None."""
+    try:
+        from safetensors import safe_open
+        with safe_open(path, framework="pt", device="cpu") as f:
+            keys = list(f.keys())
+            return f.get_tensor(LM_HEAD_KEY if LM_HEAD_KEY in keys else keys[0])
+    except Exception as e:
+        _log(f"LM head cache {path} unreadable ({e}): downloading again")
+        return None
+
+
+def download_lm_head(repo=LM_HEAD_REPO, dest=LM_HEAD_CACHE, token=None, key=LM_HEAD_KEY):
+    """Fetches ONE tensor of a sharded HF repo with an HTTP range on its shard (the
+    header says where it is), and writes it as a one-tensor safetensors at `dest`. Falls
+    back to downloading the whole shard (hf_hub_download) when the range is refused."""
+    from huggingface_hub import hf_hub_download, hf_hub_url
+    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+    kw = {"token": token} if token else {}
+    index = hf_hub_download(repo, "model.safetensors.index.json", **kw)
+    with open(index, encoding="utf-8") as f:
+        shard = json.load(f)["weight_map"][key]
+    url = hf_hub_url(repo, shard)
+    try:
+        _range_fetch_tensor(url, key, dest, token)
+        return dest
+    except Exception as e:
+        _log(f"LM head: ranged download refused ({type(e).__name__}: {e}); downloading "
+             f"the whole shard {shard} instead")
+    from safetensors import safe_open
+    from safetensors.torch import save_file
+    path = hf_hub_download(repo, shard, **kw)
+    with safe_open(path, framework="pt", device="cpu") as f:
+        save_file({key: f.get_tensor(key).contiguous()}, dest)
+    return dest
+
+
+def _range_fetch_tensor(url, key, dest, token=None, chunk=16 << 20):
+    import requests
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    def get(rng, stream=False):
+        r = requests.get(url, headers={**headers, "Range": rng}, allow_redirects=True,
+                         timeout=120, stream=stream)
+        if r.status_code != 206:
+            raise RuntimeError(f"HTTP {r.status_code} for range {rng}")
+        return r
+    n = struct.unpack("<Q", get("bytes=0-7").content[:8])[0]
+    hdr = json.loads(get(f"bytes=8-{8 + n - 1}").content)
+    meta = hdr[key]
+    a, b = meta["data_offsets"]
+    out_hdr = json.dumps({key: {"dtype": meta["dtype"], "shape": meta["shape"],
+                                "data_offsets": [0, b - a]}}).encode()
+    out_hdr += b" " * ((8 - len(out_hdr) % 8) % 8)
+    tmp = dest + ".part"
+    with open(tmp, "wb") as f, get(f"bytes={8 + n + a}-{8 + n + b - 1}", stream=True) as r:
+        f.write(struct.pack("<Q", len(out_hdr)) + out_hdr)
+        got = 0
+        for piece in r.iter_content(chunk_size=chunk):
+            f.write(piece)
+            got += len(piece)
+    if got != b - a:
+        os.remove(tmp)
+        raise RuntimeError(f"short read: {got} of {b - a} bytes")
+    os.replace(tmp, dest)
 
 
 # --- Loading -------------------------------------------------------------------------------

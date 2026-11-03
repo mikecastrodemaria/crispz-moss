@@ -549,6 +549,7 @@ def _cfg(negative=None, guidance=None):
 # the embeddings, no need to keep it.
 _EMBED_OUTS = ("prompt_embeds",)
 _CFG_IGNORED_SAID = set()   # guidance values already reported as inert
+_LAYOUT_SAID = set()        # layout size notes already logged (cz_moss.prepare_prompt)
 _CFG_REAL_SAID = set()      # (checkpoint, guidance) already announced as real CFG
 _EMBED_CACHE = {}
 _EMBED_CACHE_MAX = max(0, int(CONFIG.get("prompt_embed_cache", 8) or 0))
@@ -633,6 +634,14 @@ def _qwen_call(pipe, **kw):
     `qwen/main` (some thirty callsites).
 """
     pipe = _fresh(pipe)          # a reference that outlived free_vram (lot 7)
+    if isinstance(pipe, engine.MossPipe) and isinstance(kw.get("prompt"), str):
+        # A layout DRAFT (cz_caption) is compiled here, BEFORE the embedding cache sees
+        # the prompt, and forces the size it was drawn for (said once per layout).
+        kw["prompt"], kw["width"], kw["height"], _note = engine.prepare_prompt(
+            kw["prompt"], kw.get("width"), kw.get("height"))
+        if _note and _note not in _LAYOUT_SAID:
+            _LAYOUT_SAID.add(_note)
+            _log(_note)
     # guidance_scale: klein is distilled -> diffusers IGNORES any value > 1.0 and logs a
     # warning on EVERY call. So 1.0 is passed explicitly (= no CFG, the model's truth) to
     # silence the noise. Should an UNdistilled FLUX.2 checkpoint ever be loaded,

@@ -1,78 +1,154 @@
-"""crispz-ideogram - structured JSON captions for Ideogram 4 (lot 2).
+"""crispz-moss - structured layout prompts for MOSS-Image (lot 2).
 
-Ideogram 4 was trained on JSON captions only. The schema, from the reference repo
-(ideogram-oss/ideogram4, docs/prompting.md and src/ideogram4/caption_verifier.py):
+MOSS-Image takes three prompt forms: plain text, tag sequences, and a LAYOUT JSON that
+names the scene, every visible text VERBATIM and where each thing goes. The A/B of lot 1
+showed why the layout matters beyond placement: in plain text the model may add words it
+infers from the prompt ("COFFEE SHOP" on a coffee logo, misspelt), in a layout it renders
+the listed texts and nothing else.
 
-    {"high_level_description": "...",                         optional, recommended
-     "style_description": {                                    optional
-         "aesthetics": "...", "lighting": "...",
-         "photo": "..." | (medium first, then) "art_style": "...",
-         "medium": "...", "color_palette": ["#RRGGBB", ...]},  palette optional, <= 16
-     "compositional_deconstruction": {                         required
-         "background": "...",
-         "elements": [
-             {"type": "obj",  "bbox": [y0, x0, y1, x1], "desc": "...", "color_palette": [...]},
-             {"type": "text", "bbox": [...], "text": "VERBATIM", "desc": "...", "color_palette": [...]}]}}
+Three shapes of the same layout live here (USERGUIDE.md and the official prompt-enhancer
+skill, skills/moss-image-prompt-enhancer/references/layout.md):
 
-Key ORDER matters (the model saw one order in training):
-  style, photo:     aesthetics, lighting, photo, medium, color_palette
-  style, non-photo: aesthetics, lighting, medium, art_style, color_palette
-  obj element:      type, bbox, desc, color_palette
-  text element:     type, bbox, text, desc, color_palette
-bbox = [y_min, x_min, y_max, x_max], integers 0..1000, origin top-left. Element palettes
-hold up to 5 colours. Hex is uppercase #RRGGBB only. Serialized minified, UTF-8 literal
-(separators=(",", ":"), ensure_ascii=False).
+  EDITOR (this module's dict, what the form and the board handle):
+    {"summary": {"caption", "meta": [...], "canvas", "palette": [...]},
+     "items": [{"label": "text" | "object" | "character", "caption", "text"?, "bbox"?,
+                "palette"?, "tags"?}]}
+    with bbox = [y_min, x_min, y_max, x_max] in 0..1000 of the canvas (resolution-free:
+    a preset or a box drawn on the board does not depend on the size yet).
 
-The diffusers prompt enhancer (diffusers.pipelines.ideogram4.prompt_enhancer) uses a
-SUBSET of it (no style_description, no bbox): its output is still valid here.
+  DRAFT (the skill's readable form, what "Use as prompt" puts in the prompt box):
+    the same plus "width", "height", "bbox_coord_space": "abs", "bbox_format": "xyxy",
+    bbox = [x1, y1, x2, y2] in PIXELS from the top-left. A draft carries its canvas, so
+    the engine (cz_moss) compiles it and renders at THAT size: a layout is drawn for one
+    size, and the size follows the layout, never the opposite.
 
-This module: build a caption from editor fields, read one back into fields, validate
-(the reference CaptionVerifier, vendored in third_party/ideogram4, plus a few checks of
-our own), reorder keys, normalize colours, convert boxes. No torch, no gradio.
+  COMPILED (what the model reads, built by compile()):
+    summary + items, bbox = [y_min, x_min, y_max, x_max] in pixels from the canvas
+    CENTRE (y down), "bbox_coord_space": "abs_centralized", "bbox_format": "yxyx", one
+    minified UTF-8 line, no canvas metadata. Same arithmetic as the skill's
+    compile_prompt.py (floor the near edges, ceil the far ones, then subtract W/2, H/2).
+
+A compiled layout pasted by hand is accepted as a prompt too (it goes through as is).
+Validation is this module's own (the model publishes no verifier): the checks of the
+official compiler plus a few of ours. No torch, no gradio.
 """
 
 import json
 import math
 import re
 
-from third_party.ideogram4.caption_verifier import CaptionVerifier
-
 BBOX_SCALE = 1000
-STYLE_PALETTE_MAX = CaptionVerifier.style_description_palette_max      # 16
-ELEMENT_PALETTE_MAX = CaptionVerifier.element_palette_max              # 5
-
-# The `medium` values the docs name; free text is accepted too.
-MEDIUMS = ("graphic_design", "illustration", "photograph", "3d_render", "painting")
+GRID = 16
+LABELS = ("text", "object", "character")
+CANVASES = ("single", "multi_panel", "collage")
+# Common meta tags (the USERGUIDE's examples are "poster"; free text is accepted).
+METAS = ("poster", "logo", "business card", "book cover", "slide", "packaging",
+         "thumbnail", "social media", "banner", "product campaign", "studio photography",
+         "illustration", "infographic")
+SUMMARY_KEYS = ("meta", "canvas", "caption", "palette")
+ITEM_KEYS = ("label", "caption", "text", "bbox", "tags", "palette")
 
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-_VERIFIER = CaptionVerifier()
 
 
-# --- Serialization -------------------------------------------------------------------
-def to_text(caption):
-    """The caption as the model wants it: minified, UTF-8 literal."""
-    return json.dumps(caption, separators=(",", ":"), ensure_ascii=False)
+# --- Text forms ----------------------------------------------------------------------
+def to_prompt(layout, width, height):
+    """The DRAFT as one minified UTF-8 line: what goes in the prompt box (the engine
+    compiles it at render time and renders at width x height)."""
+    return json.dumps(to_draft(layout, width, height), separators=(",", ":"),
+                      ensure_ascii=False)
 
 
-def to_pretty(caption):
-    """Indented, for the raw-JSON editor (to_text is what goes to the model)."""
-    return json.dumps(caption, indent=2, ensure_ascii=False)
+def to_pretty(layout, width, height):
+    """The draft, indented, for the raw-JSON editor."""
+    return json.dumps(to_draft(layout, width, height), indent=2, ensure_ascii=False)
+
+
+def to_draft(layout, width, height):
+    """EDITOR dict -> DRAFT dict (pixel boxes [x1, y1, x2, y2], the canvas written in)."""
+    w, h = int(width), int(height)
+    out = {"width": w, "height": h, "bbox_coord_space": "abs", "bbox_format": "xyxy",
+           "summary": _summary_of(layout), "items": []}
+    for it in layout.get("items") or []:
+        d = _item_of(it)
+        b = parse_bbox(it.get("bbox"))
+        if b:
+            x0, y0, x1, y1 = bbox_to_pixels(b, w, h)
+            d["bbox"] = [x0, y0, x1, y1]
+        out["items"].append(d)
+    return out
+
+
+def _summary_of(layout):
+    s = layout.get("summary") or {}
+    out = {}
+    meta = [str(m).strip() for m in (s.get("meta") or []) if str(m).strip()]
+    if meta:
+        out["meta"] = meta
+    canvas = str(s.get("canvas") or "").strip()
+    if canvas:
+        out["canvas"] = canvas
+    out["caption"] = str(s.get("caption") or "").strip()
+    pal, _ = parse_palette(s.get("palette") or [], 16)
+    if pal:
+        out["palette"] = pal
+    return out
+
+
+def _item_of(it):
+    label = str(it.get("label") or "object").strip().lower()
+    if label == "obj":
+        label = "object"
+    d = {"label": label, "caption": str(it.get("caption") or "").strip()}
+    if label == "text" or it.get("text"):
+        d["text"] = str(it.get("text") or "")
+    tags = [str(t).strip() for t in (it.get("tags") or []) if str(t).strip()]
+    if tags:
+        d["tags"] = tags
+    pal, _ = parse_palette(it.get("palette") or [], 5)
+    if pal:
+        d["palette"] = pal
+    return d
+
+
+def compile(draft):
+    """DRAFT (dict or JSON text) -> (compiled_text, width, height): the one-line JSON the
+    model reads. Raises ValueError with a readable message on an invalid draft. A
+    COMPILED input is returned as is (width and height then None)."""
+    d = parse(draft) if isinstance(draft, str) else draft
+    if is_compiled(d):
+        return json.dumps(d, separators=(",", ":"), ensure_ascii=False,
+                          allow_nan=False), None, None
+    problems = validate_draft(d)
+    if problems:
+        raise ValueError("; ".join(problems[:3]))
+    w, h = int(d["width"]), int(d["height"])
+    items = []
+    for it in d["items"]:
+        c = dict(it)
+        x1, y1, x2, y2 = it["bbox"]
+        c["bbox"] = [math.floor(round(y1, 9)) - h // 2, math.floor(round(x1, 9)) - w // 2,
+                     math.ceil(round(y2, 9)) - h // 2, math.ceil(round(x2, 9)) - w // 2]
+        items.append({k: c[k] for k in ITEM_KEYS if k in c})
+    out = {"summary": {k: d["summary"][k] for k in SUMMARY_KEYS if k in d["summary"]},
+           "items": items, "bbox_coord_space": "abs_centralized", "bbox_format": "yxyx"}
+    return json.dumps(out, separators=(",", ":"), ensure_ascii=False, allow_nan=False), w, h
 
 
 def parse(text):
-    """A caption dict from JSON text. Raises ValueError with a readable message."""
+    """A dict from JSON text. Raises ValueError with a readable message."""
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
         raise ValueError(f"invalid JSON at line {e.lineno} column {e.colno}: {e.msg}")
     if not isinstance(data, dict):
-        raise ValueError("a caption is a JSON object ({...})")
+        raise ValueError("a layout is a JSON object ({...})")
     return data
 
 
 def is_caption(text):
-    """True when `text` is a JSON caption (and must therefore bypass the styles, the
-    {a|b} variants and anything else that rewrites a plain prompt)."""
+    """True when `text` is a layout JSON (draft or compiled): such a prompt bypasses the
+    styles, the {a|b} variants and anything else that rewrites a plain prompt."""
     if not isinstance(text, str):
         return False
     t = text.strip()
@@ -82,8 +158,85 @@ def is_caption(text):
         data = json.loads(t)
     except ValueError:
         return False
-    return isinstance(data, dict) and (
-        "compositional_deconstruction" in data or "high_level_description" in data)
+    return isinstance(data, dict) and "items" in data and "summary" in data
+
+
+def is_draft(d):
+    return (isinstance(d, dict) and "items" in d and "summary" in d
+            and str(d.get("bbox_coord_space", "abs")) == "abs")
+
+
+def is_compiled(d):
+    return (isinstance(d, dict) and "items" in d and "summary" in d
+            and d.get("bbox_coord_space") == "abs_centralized")
+
+
+def from_text(text, width=None, height=None):
+    """DRAFT or COMPILED text (or dict) -> (EDITOR dict, width, height). A compiled
+    layout has no canvas: `width` / `height` (the sliders) say which one it was drawn
+    for; without them the canvas is guessed from the farthest box, rounded to 16."""
+    d = parse(text) if isinstance(text, str) else text
+    if not (isinstance(d, dict) and "items" in d):
+        raise ValueError("not a MOSS layout (no 'items')")
+    summary = d.get("summary") if isinstance(d.get("summary"), dict) else {}
+    items_in = d.get("items") if isinstance(d.get("items"), list) else []
+    compiled = is_compiled(d)
+    if compiled:
+        if width and height:
+            w, h = int(width), int(height)
+        else:
+            w, h = guess_canvas(d)
+    else:
+        try:
+            w, h = int(d.get("width") or width or 1024), int(d.get("height") or height or 1024)
+        except (TypeError, ValueError):
+            w, h = int(width or 1024), int(height or 1024)
+    items = []
+    for it in items_in:
+        if not isinstance(it, dict):
+            continue
+        e = {"label": it.get("label", "object"), "caption": it.get("caption", ""),
+             "text": it.get("text", ""), "tags": list(it.get("tags") or []),
+             "palette": list(it.get("palette") or []), "bbox": None}
+        b = it.get("bbox")
+        if isinstance(b, list) and len(b) == 4:
+            try:
+                vals = [float(v) for v in b]
+            except (TypeError, ValueError):
+                vals = None
+            if vals:
+                if compiled:
+                    y0, x0, y1, x1 = vals
+                    e["bbox"] = bbox_from_pixels(x0 + w / 2, y0 + h / 2, x1 + w / 2,
+                                                 y1 + h / 2, w, h)
+                else:
+                    x0, y0, x1, y1 = vals
+                    e["bbox"] = bbox_from_pixels(x0, y0, x1, y1, w, h)
+        items.append(e)
+    layout = {"summary": {"caption": summary.get("caption", ""),
+                          "meta": list(summary.get("meta") or []),
+                          "canvas": summary.get("canvas", ""),
+                          "palette": list(summary.get("palette") or [])},
+              "items": items}
+    return layout, w, h
+
+
+def guess_canvas(compiled):
+    """The smallest 16-multiple canvas that holds every centred box (a compiled layout
+    carries no size)."""
+    mx = my = 0.0
+    for it in compiled.get("items") or []:
+        b = it.get("bbox") if isinstance(it, dict) else None
+        if isinstance(b, list) and len(b) == 4:
+            try:
+                y0, x0, y1, x1 = (float(v) for v in b)
+            except (TypeError, ValueError):
+                continue
+            my = max(my, abs(y0), abs(y1))
+            mx = max(mx, abs(x0), abs(x1))
+    w = max(GRID, int(math.ceil(2 * mx / GRID) * GRID)) if mx else 1024
+    h = max(GRID, int(math.ceil(2 * my / GRID) * GRID)) if my else 1024
+    return w, h
 
 
 # --- Colours and boxes ---------------------------------------------------------------
@@ -118,8 +271,8 @@ def parse_palette(value, limit):
 
 
 def bbox_from_pixels(x0, y0, x1, y1, width, height):
-    """A box drawn in pixels on a width x height canvas -> [y_min, x_min, y_max, x_max]
-    in 0..1000, ordered and clamped."""
+    """A box in pixels on a width x height canvas -> [y_min, x_min, y_max, x_max] in
+    0..1000, ordered and clamped."""
     def n(v, size):
         return max(0, min(BBOX_SCALE, int(round(float(v) * BBOX_SCALE / float(size)))))
     xa, xb = sorted((n(x0, width), n(x1, width)))
@@ -135,7 +288,8 @@ def bbox_to_pixels(bbox, width, height):
 
 
 def parse_bbox(value):
-    """A bbox from a list or from text ('120, 80, 300, 920'); None when empty/invalid."""
+    """A 0..1000 bbox from a list or from text ('120, 80, 300, 920'); None when
+    empty / invalid."""
     if value is None or value == "":
         return None
     if isinstance(value, str):
@@ -152,166 +306,199 @@ def parse_bbox(value):
 
 
 def aspect_ratio(width, height):
-    """'W:H' reduced, as the magic prompts expect it."""
+    """'W:H' reduced."""
     g = math.gcd(int(width), int(height)) or 1
     return f"{int(width) // g}:{int(height) // g}"
 
 
-# --- Key order -----------------------------------------------------------------------
-def reorder_keys(caption):
-    """Puts every object of a caption in the canonical key order, in place, and returns
-    it. Unknown keys are kept, after the known ones (validate() still flags them).
-    Same rules as reorder_caption_keys in ideogram-oss/ideogram4 (Apache-2.0)."""
-    def ordered(d, order):
-        known = [k for k in order if k in d]
-        extra = [k for k in d if k not in order]
-        return {k: d[k] for k in (*known, *extra)}
-
-    if not isinstance(caption, dict):
-        return caption
-    top = ("high_level_description", "style_description", "compositional_deconstruction")
-    caption_sorted = ordered(caption, top)
-    caption.clear()
-    caption.update(caption_sorted)
-    sd = caption.get("style_description")
-    if isinstance(sd, dict):
-        try:
-            caption["style_description"] = ordered(sd, _VERIFIER._style_description_key_order(sd))
-        except ValueError:
-            pass        # both or neither of photo / art_style: validate() says so
-    cd = caption.get("compositional_deconstruction")
-    if isinstance(cd, dict):
-        cd = ordered(cd, _VERIFIER.compositional_deconstruction_key_order)
-        if isinstance(cd.get("elements"), list):
-            out = []
-            for el in cd["elements"]:
-                if isinstance(el, dict):
-                    try:
-                        el = ordered(el, _VERIFIER._element_key_order(el))
-                    except ValueError:
-                        pass
-                out.append(el)
-            cd["elements"] = out
-        caption["compositional_deconstruction"] = cd
-    return caption
+def fit_grid(width, height):
+    """The nearest 16-multiples (what MOSS-Image renders)."""
+    return max(GRID, int(width) // GRID * GRID), max(GRID, int(height) // GRID * GRID)
 
 
 # --- Build from editor fields / read back --------------------------------------------
-def build(high_level_description="", style=None, background="", elements=()):
-    """A caption dict from the editor's fields, keys in the canonical order, empty
-    optional fields left out.
+def build(caption="", meta=(), canvas="single", palette=None, items=()):
+    """An EDITOR dict from the form's fields; empty optionals left out of the text forms
+    (to_draft) but present here so the form round-trips.
 
-    style: {"kind": "photo"|"art", "aesthetics", "lighting", "photo" or "art_style",
-            "medium", "color_palette"} -- included when any of its text fields is set.
-    elements: dicts {"type": "obj"|"text", "text", "desc", "bbox", "color_palette"}."""
-    cap = {}
-    hld = (high_level_description or "").strip()
-    if hld:
-        cap["high_level_description"] = hld
-    st = style or {}
-    detail_key = "photo" if st.get("kind") == "photo" else "art_style"
-    detail = (st.get(detail_key) or st.get("detail") or "").strip()
-    fields = {k: (st.get(k) or "").strip() for k in ("aesthetics", "lighting", "medium")}
-    palette, _ = parse_palette(st.get("color_palette") or [], STYLE_PALETTE_MAX)
-    if any(fields.values()) or detail or palette:
-        sd = {"aesthetics": fields["aesthetics"], "lighting": fields["lighting"]}
-        if detail_key == "photo":
-            sd["photo"] = detail
-            sd["medium"] = fields["medium"] or "photograph"
-        else:
-            sd["medium"] = fields["medium"] or "graphic_design"
-            sd["art_style"] = detail
-        if palette:
-            sd["color_palette"] = palette
-        cap["style_description"] = sd
-    els = []
-    for e in elements or ():
-        kind = "text" if (e.get("type") == "text") else "obj"
-        text = e.get("text") or ""
-        desc = (e.get("desc") or "").strip()
-        bbox = parse_bbox(e.get("bbox"))
-        pal, _ = parse_palette(e.get("color_palette") or [], ELEMENT_PALETTE_MAX)
-        if not desc and not (kind == "text" and text):
+    meta: a list or comma-separated text. items: dicts {"label", "caption", "text",
+    "bbox" (0..1000 list or text), "palette", "tags"}; an empty row is skipped."""
+    if isinstance(meta, str):
+        meta = [m.strip() for m in meta.split(",")]
+    pal, _ = parse_palette(palette or [], 16)
+    out_items = []
+    for it in items or ():
+        label = str(it.get("label") or "object").strip().lower()
+        if label == "obj":
+            label = "object"
+        if label not in LABELS:
+            label = "object"
+        text = str(it.get("text") or "")
+        cap = str(it.get("caption") or "").strip()
+        if not cap and not (label == "text" and text):
             continue                                  # an empty editor row
-        el = {"type": kind}
-        if bbox:
-            el["bbox"] = bbox
-        if kind == "text":
-            el["text"] = text
-        el["desc"] = desc
-        if pal:
-            el["color_palette"] = pal
-        els.append(el)
-    cap["compositional_deconstruction"] = {"background": (background or "").strip(),
-                                           "elements": els}
-    return cap
+        e = {"label": label, "caption": cap, "text": text if label == "text" else "",
+             "bbox": parse_bbox(it.get("bbox")),
+             "palette": parse_palette(it.get("palette") or [], 5)[0]}
+        tags = it.get("tags") or []
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",")]
+        e["tags"] = [t for t in tags if t]
+        out_items.append(e)
+    return {"summary": {"caption": (caption or "").strip(),
+                        "meta": [m for m in meta if m],
+                        "canvas": (canvas or "").strip(), "palette": pal},
+            "items": out_items}
 
 
-def fields_of(caption):
-    """The editor fields of a caption (the inverse of build, for the raw-JSON -> form
-    round trip). Unknown keys are not carried over: validate() reports them first."""
-    sd = caption.get("style_description") or {}
-    cd = caption.get("compositional_deconstruction") or {}
-    kind = "photo" if "photo" in sd else "art"
-    style = {"kind": kind,
-             "aesthetics": sd.get("aesthetics", ""), "lighting": sd.get("lighting", ""),
-             "detail": sd.get("photo" if kind == "photo" else "art_style", ""),
-             "medium": sd.get("medium", ""),
-             "color_palette": list(sd.get("color_palette") or [])}
-    elements = []
-    for e in cd.get("elements") or []:
-        if isinstance(e, dict):
-            elements.append({"type": e.get("type", "obj"), "text": e.get("text", ""),
-                             "desc": e.get("desc", ""), "bbox": e.get("bbox"),
-                             "color_palette": list(e.get("color_palette") or [])})
-    return {"high_level_description": caption.get("high_level_description", ""),
-            "style": style, "background": cd.get("background", ""),
-            "elements": elements}
+def fields_of(layout):
+    """The editor fields of an EDITOR dict (the inverse of build)."""
+    s = layout.get("summary") or {}
+    items = []
+    for it in layout.get("items") or []:
+        items.append({"label": it.get("label", "object"), "caption": it.get("caption", ""),
+                      "text": it.get("text", ""), "bbox": it.get("bbox"),
+                      "palette": list(it.get("palette") or []),
+                      "tags": list(it.get("tags") or [])})
+    return {"caption": s.get("caption", ""), "meta": list(s.get("meta") or []),
+            "canvas": s.get("canvas", "single"), "palette": list(s.get("palette") or []),
+            "items": items}
 
 
 # --- Validation ----------------------------------------------------------------------
-def validate(caption_or_text):
-    """Warnings for a caption (dict or JSON text); [] means it matches the schema.
-
-    The reference CaptionVerifier (key presence, order, types, bbox range, hex format,
-    palette sizes, \\uXXXX escapes) plus our own: empty descriptions, a text element
-    without text, an empty element list, an inverted or zero-area box."""
-    if isinstance(caption_or_text, str):
-        warnings = _VERIFIER.check_ensure_ascii_false(caption_or_text)
+def validate_draft(d):
+    """Problems of a DRAFT dict (the official compiler's checks): [] when it compiles."""
+    p = []
+    if not isinstance(d, dict):
+        return ["the draft is not a JSON object"]
+    root = {"width", "height", "bbox_coord_space", "bbox_format", "summary", "items"}
+    unknown = sorted(set(d) - root)
+    missing = sorted(root - set(d))
+    if unknown:
+        p.append(f"unknown top-level fields {unknown}")
+    if missing:
+        p.append(f"missing top-level fields {missing}")
+    w, h = d.get("width"), d.get("height")
+    for name, v in (("width", w), ("height", h)):
+        if not (type(v) is int and v > 0 and v % GRID == 0):
+            p.append(f"{name} must be a positive multiple of 16 (got {v!r})")
+    if d.get("bbox_coord_space") != "abs":
+        p.append("bbox_coord_space must be 'abs' in a draft")
+    if d.get("bbox_format") != "xyxy":
+        p.append("bbox_format must be 'xyxy' in a draft")
+    p += _validate_summary(d.get("summary"))
+    items = d.get("items")
+    if not isinstance(items, list) or not items:
+        p.append("items must be a nonempty array")
+        return p
+    ok_canvas = (type(w) is int and type(h) is int and w > 0 and h > 0)
+    for i, it in enumerate(items):
+        loc = f"items[{i}]"
+        p += _validate_item(it, loc)
+        b = it.get("bbox") if isinstance(it, dict) else None
+        if not (isinstance(b, list) and len(b) == 4):
+            p.append(f"{loc}.bbox must be [x1, y1, x2, y2]")
+            continue
         try:
-            caption = parse(caption_or_text)
+            x1, y1, x2, y2 = (float(v) for v in b)
+        except (TypeError, ValueError):
+            p.append(f"{loc}.bbox must hold four numbers")
+            continue
+        if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+            p.append(f"{loc}.bbox must hold finite numbers")
+        elif not (x1 < x2 and y1 < y2):
+            p.append(f"{loc}.bbox has no area {b}")
+        elif ok_canvas and not (0 <= x1 and x2 <= w and 0 <= y1 and y2 <= h):
+            p.append(f"{loc}.bbox exceeds the {w}x{h} canvas {b}")
+    return p
+
+
+def _validate_summary(s):
+    p = []
+    if not isinstance(s, dict):
+        return ["summary must be an object"]
+    unknown = sorted(set(s) - set(SUMMARY_KEYS))
+    if unknown:
+        p.append(f"summary: unknown fields {unknown}")
+    if not isinstance(s.get("caption"), str) or not s.get("caption", "").strip():
+        p.append("summary.caption: empty (the global description of the image)")
+    if "canvas" in s and s["canvas"] not in CANVASES:
+        p.append(f"summary.canvas must be one of {list(CANVASES)}")
+    for k in ("meta", "palette"):
+        if k in s and not (isinstance(s[k], list) and all(isinstance(x, str) and x.strip()
+                                                            for x in s[k])):
+            p.append(f"summary.{k} must be an array of non-empty strings")
+    return p
+
+
+def _validate_item(it, loc):
+    p = []
+    if not isinstance(it, dict):
+        return [f"{loc} must be an object"]
+    unknown = sorted(set(it) - set(ITEM_KEYS))
+    if unknown:
+        p.append(f"{loc}: unknown fields {unknown}")
+    if it.get("label") not in LABELS:
+        p.append(f"{loc}.label must be one of {list(LABELS)}")
+    if not isinstance(it.get("caption"), str) or not it.get("caption", "").strip():
+        p.append(f"{loc}.caption: empty (what this element looks like)")
+    if it.get("label") == "text" and not (isinstance(it.get("text"), str) and it["text"]):
+        p.append(f"{loc}.text: empty (a text item renders these exact characters)")
+    for k in ("tags", "palette"):
+        if k in it and not (isinstance(it[k], list) and all(isinstance(x, str) and x.strip()
+                                                              for x in it[k])):
+            p.append(f"{loc}.{k} must be an array of non-empty strings")
+    return p
+
+
+def validate(layout_or_text, width=None, height=None):
+    """Warnings for a layout in any shape (EDITOR dict with width / height, DRAFT or
+    COMPILED dict or text); [] means it compiles. Our own checks on top of the official
+    compiler's: a box too thin to render (under 16 px a side), a text item whose text is
+    only whitespace, a 0..1000 box with no area."""
+    if isinstance(layout_or_text, str):
+        try:
+            d = parse(layout_or_text)
         except ValueError as e:
-            return warnings + [str(e)]
+            return [str(e)]
     else:
-        warnings, caption = [], caption_or_text
-    warnings += _VERIFIER.verify(caption)
-    if not isinstance(caption, dict):
-        return warnings
-    sd = caption.get("style_description")
-    if isinstance(sd, dict):
-        for k in ("aesthetics", "lighting", "medium", "photo", "art_style"):
-            if k in sd and isinstance(sd[k], str) and not sd[k].strip():
-                warnings.append(f"style_description.{k}: empty")
-    cd = caption.get("compositional_deconstruction")
-    if isinstance(cd, dict):
-        if isinstance(cd.get("background"), str) and not cd["background"].strip():
-            warnings.append("compositional_deconstruction.background: empty")
-        els = cd.get("elements")
-        if isinstance(els, list):
-            if not els:
-                warnings.append("compositional_deconstruction.elements: empty (the "
-                                "model draws what the elements name)")
-            for i, e in enumerate(els):
-                if not isinstance(e, dict):
-                    continue
-                if not str(e.get("desc", "")).strip():
-                    warnings.append(f"elements[{i}].desc: empty")
-                if e.get("type") == "text" and not str(e.get("text", "")):
-                    warnings.append(f"elements[{i}].text: empty (a text element renders "
-                                    "these exact characters)")
-                b = e.get("bbox")
-                if (isinstance(b, list) and len(b) == 4
-                        and all(isinstance(v, int) for v in b)
-                        and (b[0] == b[2] or b[1] == b[3])):
-                    warnings.append(f"elements[{i}].bbox: zero area {b}")
-    return warnings
+        d = layout_or_text
+    if not isinstance(d, dict):
+        return ["not a JSON object"]
+    if is_compiled(d):
+        p = _validate_summary(d.get("summary"))
+        items = d.get("items")
+        if not isinstance(items, list) or not items:
+            return p + ["items must be a nonempty array"]
+        for i, it in enumerate(items):
+            p += _validate_item(it, f"items[{i}]")
+            b = it.get("bbox") if isinstance(it, dict) else None
+            if isinstance(b, list) and len(b) == 4 and all(isinstance(v, (int, float)) for v in b):
+                if not (b[0] < b[2] and b[1] < b[3]):
+                    p.append(f"items[{i}].bbox has no area {b}")
+            else:
+                p.append(f"items[{i}].bbox must be [y_min, x_min, y_max, x_max]")
+        return p
+    if "width" in d or "bbox_coord_space" in d:
+        p = validate_draft(d)
+        w, h = d.get("width"), d.get("height")
+    else:
+        if not (width and height):
+            width, height = 1024, 1024
+        p = validate_draft(to_draft(d, width, height))
+        w, h = int(width), int(height)
+        for i, it in enumerate(d.get("items") or []):
+            b = parse_bbox(it.get("bbox")) if isinstance(it, dict) else None
+            if b and (b[0] >= b[2] or b[1] >= b[3]):
+                p.append(f"items[{i}].bbox: no area {b}")
+    items = d.get("items") if isinstance(d.get("items"), list) else []
+    draft_items = (to_draft(d, w, h)["items"] if "width" not in d and w and h else items)
+    for i, it in enumerate(draft_items):
+        b = it.get("bbox") if isinstance(it, dict) else None
+        if isinstance(b, list) and len(b) == 4 and all(isinstance(v, (int, float)) for v in b):
+            if b[2] - b[0] < GRID or b[3] - b[1] < GRID:
+                p.append(f"items[{i}].bbox: under 16 px a side, nothing renders there")
+        if isinstance(it, dict) and it.get("label") == "text" and isinstance(it.get("text"), str) \
+                and it["text"] and not it["text"].strip():
+            p.append(f"items[{i}].text: whitespace only")
+    return p

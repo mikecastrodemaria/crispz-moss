@@ -1,8 +1,9 @@
-"""cz_caption: the Ideogram 4 JSON caption (schema of ideogram-oss/ideogram4, docs/prompting.md).
+"""cz_caption: the MOSS-Image layout in its three shapes (editor 0..1000, draft in pixels,
+compiled centred), the presets, the editor's pure half.
 
-No model, no GPU. The fixtures are the examples of the reference docs and of diffusers'
-prompt enhancer: they must pass the reference CaptionVerifier with no warning, and the
-editor round trip (fields -> caption -> fields) must not lose anything.
+No model, no GPU. The fixture is the USERGUIDE's own layout example (1024x1024 poster,
+"EXPLORE") and the official skill's compile example (1536x1024, Chinese copy): the
+compiler here must give the very numbers those documents print.
 
 Run:  .venv/Scripts/python -m pytest tests/test_caption.py -q
 """
@@ -14,204 +15,196 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cz_caption as C  # noqa: E402
 
-# docs/prompting.md, the first example (photo style, palette, bboxes).
-DOC_PHOTO = {
-    "high_level_description": "A golden retriever riding a skateboard down a sunny sidewalk.",
-    "style_description": {
-        "aesthetics": "warm, playful, vibrant",
-        "lighting": "bright afternoon sunlight, long soft shadows",
-        "photo": "shallow depth of field, eye-level, 85mm lens",
-        "medium": "photograph",
-        "color_palette": ["#F5C542", "#87CEEB", "#4A4A4A", "#FFFFFF", "#2E8B57"]},
-    "compositional_deconstruction": {
-        "background": "A sun-drenched suburban sidewalk lined with green hedges.",
-        "elements": [
-            {"type": "obj", "bbox": [200, 300, 800, 900], "desc": "A golden retriever."},
-            {"type": "obj", "bbox": [250, 750, 750, 950], "desc": "A worn red skateboard."}]}}
+# USERGUIDE.md: a 1024x1024 canvas, boxes already centred (the compiled form).
+GUIDE_COMPILED = {
+    "summary": {"meta": ["poster"], "canvas": "single",
+                "caption": "A minimalist travel poster with a cream background, a blue "
+                           "mountain illustration, and the title EXPLORE at the top."},
+    "items": [
+        {"label": "text", "caption": "Large dark-blue uppercase title centered at the top.",
+         "text": "EXPLORE", "bbox": [-416, -384, -288, 384]},
+        {"label": "object", "caption": "A flat blue mountain illustration in the lower center.",
+         "bbox": [-192, -288, 384, 288]}],
+    "bbox_coord_space": "abs_centralized", "bbox_format": "yxyx"}
 
-# docs/prompting.md, the corporate card (art_style, text elements, no bbox).
-DOC_DESIGN = {
-    "high_level_description": "A clean, modern business card layout for a tech company.",
-    "style_description": {
-        "aesthetics": "minimal, professional, geometric",
-        "lighting": "even, diffuse studio lighting",
-        "medium": "graphic_design",
-        "art_style": "flat vector design, generous whitespace, sans-serif typography",
-        "color_palette": ["#FFFFFF", "#F0F0F0", "#333333", "#0066FF", "#00CC88"]},
-    "compositional_deconstruction": {
-        "background": "A solid off-white card surface with subtle paper texture.",
-        "elements": [
-            {"type": "text", "text": "ACME TECH", "desc": "Bold dark grey company name."},
-            {"type": "text", "text": "hello@acme.tech", "desc": "Small blue contact email."}]}}
-
-# diffusers' prompt enhancer example (no style_description, no bbox, \n in a text).
-DIFFUSERS_ENHANCER = ('{"high_level_description":"A minimalist jazz festival poster.",'
-                      '"compositional_deconstruction":{"background":"Solid deep teal.",'
-                      '"elements":[{"type":"obj","desc":"A flat geometric saxophone."},'
-                      '{"type":"text","text":"JAZZ\\nFESTIVAL","desc":"Large cream headline."}]}}')
+# skills/.../references/layout.md: the draft (pixels, top-left) and what it compiles to.
+SKILL_DRAFT = {
+    "width": 1536, "height": 1024, "bbox_coord_space": "abs", "bbox_format": "xyxy",
+    "summary": {"meta": ["product campaign", "studio photography"], "canvas": "single",
+                "caption": "A warm studio campaign for a handmade ceramic cup."},
+    "items": [
+        {"label": "object", "caption": "An ivory ceramic cup with a rounded handle.",
+         "bbox": [176, 224, 800, 864]},
+        {"label": "text", "caption": "Large dark-green Chinese title.",
+         "text": "把日常，过成诗。", "bbox": [928, 272, 1408, 448]},
+        {"label": "text", "caption": "Smaller supporting copy on two lines.",
+         "text": "一杯温暖\n一刻从容", "bbox": [928, 512, 1376, 656]}]}
 
 
-def test_reference_examples_are_valid():
-    assert C.validate(DOC_PHOTO) == []
-    assert C.validate(DOC_DESIGN) == []
-    assert C.validate(DIFFUSERS_ENHANCER) == []
-    assert C.is_caption(DIFFUSERS_ENHANCER)
+def test_the_skill_example_compiles_to_the_documented_numbers():
+    text, w, h = C.compile(SKILL_DRAFT)
+    assert (w, h) == (1536, 1024)
+    d = json.loads(text)
+    assert d["items"][0]["bbox"] == [-288, -592, 352, 32]          # the number in layout.md
+    assert d["bbox_coord_space"] == "abs_centralized" and d["bbox_format"] == "yxyx"
+    assert "width" not in d and "\n" not in text and "一杯温暖\\n一刻从容" in text
+    assert list(d) == ["summary", "items", "bbox_coord_space", "bbox_format"]
+    assert list(d["items"][1]) == ["label", "caption", "text", "bbox"]
+    assert C.validate(SKILL_DRAFT) == [] and C.validate(text) == []
 
 
-def test_editor_round_trip_rebuilds_the_same_caption():
-    for cap in (DOC_PHOTO, DOC_DESIGN, json.loads(DIFFUSERS_ENHANCER)):
-        f = C.fields_of(cap)
-        again = C.build(f["high_level_description"], f["style"], f["background"],
-                        f["elements"])
-        assert again == cap, (again, cap)
-        assert list(again) == list(cap)          # top-level key order too
+def test_fractional_edges_are_enclosed_like_the_official_compiler():
+    d = dict(SKILL_DRAFT, items=[{"label": "object", "caption": "c",
+                                  "bbox": [10.4, 20.6, 100.2, 200.7]}])
+    out = json.loads(C.compile(d)[0])["items"][0]["bbox"]
+    assert out == [20 - 512, 10 - 768, 201 - 512, 101 - 768]
 
 
-def test_build_orders_keys_and_drops_empty_optionals():
-    cap = C.build(
-        "A poster.",
-        {"kind": "art", "aesthetics": "bold", "lighting": "flat", "detail": "flat vector",
-         "color_palette": "#fff, 1b1b2f"},
-        "Solid red.",
-        [{"type": "text", "text": "GRAND OPENING", "desc": "Huge headline.",
-          "bbox": "100, 80, 300, 920", "color_palette": ["#ffffff"]},
-         {"type": "obj", "desc": "", "text": ""},                     # an empty row
-         {"type": "obj", "desc": "A croissant basket."}])
-    sd = cap["style_description"]
-    assert list(sd) == ["aesthetics", "lighting", "medium", "art_style", "color_palette"]
-    assert sd["medium"] == "graphic_design" and sd["color_palette"] == ["#FFFFFF", "#1B1B2F"]
-    els = cap["compositional_deconstruction"]["elements"]
-    assert len(els) == 2
-    assert list(els[0]) == ["type", "bbox", "text", "desc", "color_palette"]
-    assert els[0]["bbox"] == [100, 80, 300, 920]
-    assert list(els[1]) == ["type", "desc"]
-    assert C.validate(cap) == []
-    assert C.build("x")["compositional_deconstruction"] == {"background": "", "elements": []}
-    assert "style_description" not in C.build("x", {"kind": "photo"})
+def test_the_guide_example_reads_back_and_recompiles():
+    lay, w, h = C.from_text(json.dumps(GUIDE_COMPILED), 1024, 1024)
+    assert (w, h) == (1024, 1024)
+    assert lay["items"][0]["bbox"] == [94, 125, 219, 875]           # 0..1000 of the canvas
+    again = json.loads(C.compile(C.to_draft(lay, 1024, 1024))[0])
+    # the editor keeps thousandths of the canvas: a pixel of play at most on the way back
+    for got, want in ((again["items"][0]["bbox"], [-416, -384, -288, 384]),
+                      (again["items"][1]["bbox"], [-192, -288, 384, 288])):
+        assert all(abs(a - b) <= 1 for a, b in zip(got, want)), (got, want)
+    assert again["summary"] == GUIDE_COMPILED["summary"]
+    # without a size the canvas is guessed from the farthest box (384 -> 768, 16-grid)
+    _, gw, gh = C.from_text(json.dumps(GUIDE_COMPILED))
+    assert (gw, gh) == (768, 832)
+    assert C.validate(GUIDE_COMPILED) == []
 
 
-def test_photo_style_order():
-    cap = C.build("A cat.", {"kind": "photo", "aesthetics": "soft", "lighting": "window",
-                             "detail": "85mm"}, "A room.", [{"desc": "A cat."}])
-    assert list(cap["style_description"]) == ["aesthetics", "lighting", "photo", "medium"]
-    assert cap["style_description"]["medium"] == "photograph"
-    assert C.validate(cap) == []
+def test_build_and_fields_round_trip():
+    lay = C.build("A poster.", "poster, event", "single", "#fff, 1b1b2f",
+                  [{"label": "text", "text": "GRAND OPENING", "caption": "Huge headline.",
+                    "bbox": "100, 80, 300, 920", "palette": ["#ffffff"]},
+                   {"label": "obj", "caption": "", "text": ""},                 # empty row
+                   {"label": "obj", "caption": "A croissant basket."}])
+    assert lay["summary"]["meta"] == ["poster", "event"]
+    assert lay["summary"]["palette"] == ["#FFFFFF", "#1B1B2F"]
+    assert [it["label"] for it in lay["items"]] == ["text", "object"]
+    assert lay["items"][0]["bbox"] == [100, 80, 300, 920]
+    f = C.fields_of(lay)
+    assert C.build(f["caption"], f["meta"], f["canvas"], f["palette"], f["items"]) == lay
+    d = C.to_draft(lay, 720, 1024)
+    assert d["items"][0]["bbox"] == [58, 102, 662, 307]
+    assert "bbox" not in d["items"][1] and "palette" not in d["items"][1]
+    assert C.validate(C.to_prompt(lay, 720, 1024)) == ["items[1].bbox must be [x1, y1, x2, y2]"]
 
 
-def test_serialization_is_minified_utf8():
-    cap = C.build("Café « crème »", None, "Fond", [{"type": "text", "text": "日本", "desc": "x"}])
-    t = C.to_text(cap)
-    assert ", " not in t and ": " not in t
-    assert "Café" in t and "日本" in t and "\\u" not in t
-    escaped = json.dumps(cap)                                  # ensure_ascii=True
-    assert any("ensure_ascii" in w for w in C.validate(escaped))
-
-
-def test_colours():
-    assert C.normalize_hex("#abc") == "#AABBCC"
-    assert C.normalize_hex("aabbcc") == "#AABBCC"
-    assert C.normalize_hex("#1b1B2f") == "#1B1B2F"
-    assert C.normalize_hex("red") is None and C.normalize_hex("#12345") is None
-    pal, bad = C.parse_palette("#fff red #FFF 000000", 16)
-    assert pal == ["#FFFFFF", "#000000"] and bad == ["red"]
-    pal, bad = C.parse_palette(["#000"] + [f"#{i:06X}" for i in range(1, 7)], 5)
-    assert len(pal) == 5 and len(bad) == 2
-
-
-def test_boxes():
-    # A box drawn on a 2048 x 1024 canvas, corners given in any order.
-    b = C.bbox_from_pixels(1536, 768, 512, 256, 2048, 1024)
-    assert b == [250, 250, 750, 750]
-    assert C.bbox_to_pixels(b, 2048, 1024) == (512, 256, 1536, 768)
-    assert C.bbox_from_pixels(-10, -10, 5000, 5000, 100, 100) == [0, 0, 1000, 1000]
-    assert C.parse_bbox("[10, 20, 30, 40]") == [10, 20, 30, 40]
-    assert C.parse_bbox("10 20 30") is None and C.parse_bbox("") is None
-    assert C.aspect_ratio(1920, 320) == "6:1"
-
-
-def test_validate_catches_what_matters():
-    bad = {"high_level_description": "x",
-           "style_description": {"aesthetics": "a", "lighting": "b", "photo": "c",
-                                 "art_style": "d", "medium": "e"},
-           "compositional_deconstruction": {
-               "elements": [], "background": ""}}
-    w = C.validate(bad)
-    assert any("both 'photo' and 'art_style'" in x for x in w)
-    assert any("key order" in x for x in w)
-    w = C.validate({"compositional_deconstruction": {"background": "b", "elements": [
-        {"desc": "no type"},
-        {"type": "text", "desc": "d", "text": ""},
-        {"type": "obj", "bbox": [500, 0, 400, 10], "desc": "inverted"},
-        {"type": "obj", "bbox": [10, 10, 10, 50], "desc": "flat"},
-        {"type": "obj", "desc": "x", "color_palette": ["#fff"]},
-        {"type": "obj", "desc": "y", "extra": 1}]}})
-    joined = "\n".join(w)
-    for needle in ("'type' must exist", "elements[1].text: empty", "ymin (500) > ymax (400)",
-                   "zero area", "not a valid #RRGGBB", "unknown keys ['extra']"):
-        assert needle in joined, (needle, w)
-    assert C.validate("{not json") and "invalid JSON" in C.validate("{not json")[0]
-    assert any("'compositional_deconstruction' must exist" in x
-               for x in C.validate({"high_level_description": "only"}))
-
-
-def test_reorder_keys_fixes_an_api_answer():
-    scrambled = {"compositional_deconstruction": {"elements": [
-                    {"desc": "d", "text": "T", "type": "text", "bbox": [0, 0, 10, 10]}],
-                 "background": "b"},
-                 "style_description": {"medium": "photograph", "photo": "p",
-                                       "lighting": "l", "aesthetics": "a"},
-                 "high_level_description": "h"}
-    assert C.validate(scrambled)
-    C.reorder_keys(scrambled)
-    assert C.validate(scrambled) == []
-    assert list(scrambled) == ["high_level_description", "style_description",
-                               "compositional_deconstruction"]
+def test_serialization_is_one_utf8_line():
+    lay = C.build("Café « crème »", [], "single", [], [{"label": "text", "text": "日本",
+                                                        "caption": "x", "bbox": [0, 0, 500, 500]}])
+    t = C.to_prompt(lay, 512, 512)
+    assert "\n" not in t and ", " not in t and "Café" in t and "日本" in t and "\\u" not in t
+    assert C.is_caption(t) and C.is_caption(C.compile(t)[0])
 
 
 def test_is_caption():
     assert not C.is_caption("a poster that says GRAND OPENING")
     assert not C.is_caption("{red|blue} car")
     assert not C.is_caption('{"a": 1}')
-    assert C.is_caption('  {"high_level_description": "x"}  ')
+    assert not C.is_caption('{"high_level_description": "an Ideogram caption"}')
+    assert C.is_caption('  {"summary": {"caption": "x"}, "items": []}  ')
 
 
-def test_prompt_pipeline_leaves_a_caption_alone():
-    """Styles and {a|b} variants rewrite plain prompts; on a JSON caption they would
-    produce invalid JSON, so the caption goes through untouched (and the log says so)."""
+def test_colours_and_boxes():
+    assert C.normalize_hex("#abc") == "#AABBCC" and C.normalize_hex("red") is None
+    pal, bad = C.parse_palette("#fff red #FFF 000000", 16)
+    assert pal == ["#FFFFFF", "#000000"] and bad == ["red"]
+    b = C.bbox_from_pixels(1536, 768, 512, 256, 2048, 1024)
+    assert b == [250, 250, 750, 750]
+    assert C.bbox_to_pixels(b, 2048, 1024) == (512, 256, 1536, 768)
+    assert C.parse_bbox("[10, 20, 30, 40]") == [10, 20, 30, 40]
+    assert C.parse_bbox("10 20 30") is None and C.parse_bbox("") is None
+    assert C.aspect_ratio(1920, 320) == "6:1" and C.fit_grid(1000, 1000) == (992, 992)
+
+
+def test_validate_catches_what_matters():
+    bad = {"width": 1000, "height": 1024, "bbox_coord_space": "abs", "bbox_format": "xyxy",
+           "summary": {"caption": "", "canvas": "round", "extra": 1},
+           "items": [{"label": "thing", "caption": "", "bbox": [10, 10, 5, 5]},
+                     {"label": "text", "caption": "c", "bbox": [0, 0, 2000, 10]},
+                     {"label": "object", "caption": "c", "bbox": [0, 0, 8, 8], "tags": "x"}]}
+    w = "\n".join(C.validate(bad))
+    for needle in ("width must be a positive multiple of 16", "summary.caption: empty",
+                   "summary.canvas must be one of", "unknown fields ['extra']",
+                   "items[0].label must be one of", "items[0].caption: empty",
+                   "items[0].bbox has no area", "items[1].text: empty",
+                   "items[1].bbox exceeds the 1000x1024 canvas",
+                   "items[2].tags must be an array", "under 16 px a side"):
+        assert needle in w, (needle, w)
+    assert C.validate("{not json") and "invalid JSON" in C.validate("{not json")[0]
+    assert C.validate({"summary": {"caption": "x"}, "items": []}, 512, 512) == \
+        ["items must be a nonempty array"]
+    try:
+        C.compile(bad)
+    except ValueError as e:
+        assert "width" in str(e)
+    else:
+        raise AssertionError("compile must refuse an invalid draft")
+
+
+def test_prompt_pipeline_leaves_a_layout_alone():
+    """Styles and {a|b} variants rewrite plain prompts; on a layout JSON they would
+    produce invalid JSON, so the layout goes through untouched (and the log says so)."""
     import cz_prompt
-    cap = C.to_text(C.build("A sign that says {OPEN|CLOSED}.", None, "Wall",
-                            [{"type": "text", "text": "OPEN|CLOSED", "desc": "sign"}]))
-    p, _ = cz_prompt.expand_prompt_pair(cap, "", 123)
-    assert p == cap
+    lay = C.build("A sign that says {OPEN|CLOSED}.", [], "single", [],
+                  [{"label": "text", "text": "OPEN|CLOSED", "caption": "sign",
+                    "bbox": [0, 0, 500, 500]}])
+    t = C.to_prompt(lay, 512, 512)
+    p, _ = cz_prompt.expand_prompt_pair(t, "", 123)
+    assert p == t
     style = next(iter(cz_prompt.STYLES))
-    p2, _ = cz_prompt._apply_styles(cap, "", [style])
-    assert p2 == cap and C.validate(p2) == []
-    # a plain prompt still gets both
+    p2, _ = cz_prompt._apply_styles(t, "", [style])
+    assert p2 == t and C.validate(p2) == []
     p3, _ = cz_prompt.expand_prompt_pair("a {red|red} car", "", 1)
     assert p3 == "a red car"
 
 
-def test_design_presets_are_valid_and_native_sizes():
-    """Every preset: a schema-valid caption, and a size Ideogram 4 takes as is (the
-    adapter would otherwise resize it and say so)."""
+def test_design_presets_are_valid_at_native_sizes():
+    """Every preset: a valid draft at a size MOSS-Image takes as is (16 grid, 0.6 to 2
+    Mpx), a meta tag, at least one text item, placeholders in capitals."""
     import cz_design
-    import cz_ideogram
+    import cz_moss
     assert len(cz_design.PRESETS) == 9
     for name in cz_design.PRESETS:
-        cap = cz_design.caption_of(name)
-        assert C.validate(cap) == [], (name, C.validate(cap))
         w, h = cz_design.size_of(name)
-        assert cz_ideogram.fit_size(w, h) == (w, h), (name, w, h)
-        assert any(e["type"] == "text" for e in cap["compositional_deconstruction"]["elements"])
+        assert cz_moss.fit_size(w, h) == (w, h) and 0.55e6 <= w * h <= 2.0e6, (name, w, h)
+        text = cz_design.prompt_of(name)
+        assert C.validate(text) == [], (name, C.validate(text))
+        lay = cz_design.layout_of(name)
+        assert lay["summary"]["meta"] and any(it["label"] == "text" for it in lay["items"])
+        compiled, cw, ch = C.compile(text)
+        assert (cw, ch) == (w, h) and C.validate(compiled) == []
+
+
+def test_engine_compiles_a_draft_and_forces_its_size():
+    """cz_moss.prepare_prompt: a draft becomes the compiled form at the draft's size; a
+    compiled layout goes through (with a note when its boxes overflow); plain text is
+    untouched."""
+    import cz_moss
+    import cz_design
+    text = cz_design.prompt_of("Banner (6:1)")
+    out, w, h, note = cz_moss.prepare_prompt(text, 1024, 1024)
+    assert (w, h) == (1920, 320) and json.loads(out)["bbox_coord_space"] == "abs_centralized"
+    assert note and "1920x320" in note and "1024x1024" in note
+    out2, w2, h2, note2 = cz_moss.prepare_prompt(text, 1920, 320)
+    assert (out2, w2, h2, note2) == (out, 1920, 320, None)
+    out3, w3, h3, note3 = cz_moss.prepare_prompt(out, 512, 512)
+    assert out3 == out and (w3, h3) == (512, 512) and "beyond" in note3
+    assert cz_moss.prepare_prompt("a plain prompt", 640, 480) == ("a plain prompt", 640, 480, None)
 
 
 def test_editor_form_round_trip_and_boxes():
-    """cz_caption_ui's pure half: form <-> caption, rows <-> elements, the box bridge."""
+    """cz_caption_ui's pure half: form <-> layout, rows <-> items, the box bridge."""
     import cz_caption_ui as U
     import cz_design
-    cap = cz_design.caption_of("Banner (6:1)")
-    form = U.caption_to_form(cap)
-    assert U.form_to_caption(*form) == cap
+    lay = cz_design.layout_of("Banner (6:1)")
+    form = U.layout_to_form(lay)
+    assert U.form_to_layout(*form) == lay
     rows = form[-1]
     labels = U.element_choices(rows)
     assert labels[0].startswith("1 · text · HEADLINE") and labels[0].endswith("[box]")
@@ -221,11 +214,10 @@ def test_editor_form_round_trip_and_boxes():
     assert U.apply_bbox(rows, "nonsense", [1, 2, 3, 4]) == U._rows(rows)
     assert U.parse_bridge("[100, 50, 300, 950]|1730000000") == [100, 50, 300, 950]
     assert U.parse_bridge("") is None and U.parse_bridge("junk|1") is None
-    # a Dataframe hands rows back with None cells and short rows
-    assert U.rows_to_elements([["text", "HI", None, None]])[0]["text"] == "HI"
-    html = U.render_board(cap, 1920, 320, labels[0])
+    assert U.rows_to_items([["text", "HI", None, None]])[0]["text"] == "HI"
+    html = U.render_board(lay, 1920, 320, labels[0])
     assert 'id="cz_board"' in html and "<rect" in html and "6:1" in html
-    assert 'stroke-width="3"' in html                     # the selected element
+    assert 'stroke-width="3"' in html                     # the selected item
     assert "#cz_bbox_bridge" in U.HEAD_JS
     w = U.warnings_md(["a", "b"])
-    assert "2 warning(s)" in w and U.warnings_md([]).startswith("Schema: valid")
+    assert "2 warning(s)" in w and U.warnings_md([]).startswith("Layout: valid")
