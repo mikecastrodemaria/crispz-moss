@@ -422,8 +422,32 @@ Contre Ideogram 4 sur la même carte : 1024 en 42,7 s contre 61 s, 2 Mpx en 102 
 - L'encodeur Qwen3.5 tourne avec les replis torch (`flash-linear-attention`,
   `causal_conv1d` absents) : 5,2 s par prompt, dont le transfert de 16,8 Go. Acceptable ;
   à comparer au même prompt en nf4.
-- A/B texte : 24 rendus produits dans `bench/lot1/ab/`, verdict de Mike sur `ab.md` en
-  attente.
+- A/B texte : 24 rendus produits dans `bench/lot1/ab/`, 25 s par affiche 720x1024 et
+  39 s par logo 1024 (0,5 à 0,8 s/step), texte libre et layout JSON à égalité de temps.
+
+### Bilan du lot 1 (03/11/2026) : A/B texte gagné, lot VALIDÉ
+
+Lecture sur images (Mike a envoyé 17 des 24 rendus, lus en session) :
+
+| design | rendus vus | texte exact | texte fantôme | banding |
+|---|---|---|---|---|
+| logo « BEAN THERE » 1024 | 5 | 5 / 5 | aucun | aucun |
+| affiche boulangerie 720x1024 (« GRAND OPENING », « SATURDAY 9 AM · RUE DU PAIN ») | 8 | 8 / 8, point médian et français compris | aucun | aucun |
+| affiche suisse 720x1024 (« 5B », « MOSS, real typography ») | 4 | 4 / 4, virgule comprise | aucun | aucun |
+
+17 rendus sur 17 avec tous les textes exacts, y compris les petits textes fixes que le
+test ai-muninn donnait comme point faible. Composition tenue (titre, ruban, panier ;
+numéraux, cercle rouge qui chevauche, légende en bas à gauche), styles variés d'un seed
+à l'autre sans casser le texte, aucun banding sur le SFT à ces tailles. Ideogram 4 avait
+réussi la même affiche au lot 2 en 56 s ; MOSS la rend en 25 s. **Verdict : au moins
+aussi bon qu'Ideogram 4 sur le texte, et plus rapide.** Le texte libre suffit pour
+l'exactitude ; le layout JSON servira au placement, pas à sauver la lisibilité (c'était
+l'inverse sur Ideogram).
+
+Critères d'acceptation du lot 1 remplis : tests CPU sur MOSS miniature, une 2 Mpx sur la
+5090 (1456x1456 en 102 s), A/B jugé. Points ouverts, aucun bloquant : encodeur nf4 non
+mesuré (pic à 27 Go sur un prompt nouveau), temps de chargement depuis le cache non noté
+(le premier passage incluait le téléchargement), 7 rendus de l'A/B non regardés.
 
 ## 10. Sources
 
