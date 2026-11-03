@@ -391,6 +391,40 @@ vérifiées avant tout usage client.
   pour `--nf4`), app crispz-ideogram FERMÉE, `tools\gpu_lot1_check.py` ; verdict sur
   `bench/lot1/ab.md`.
 
+### Premier passage sur la 5090 (03/11/2026, Mike) : mesures du lot 1
+
+`tools/gpu_lot1_check.py`, offload 'auto' -> 'model' encodeur seul, encodeur bf16, 50 steps,
+CFG 3,0, torch 2.11 cu128, premier lancement (téléchargement des 27 Go compris dans le
+chargement) :
+
+| | valeur |
+|---|---|
+| Chargement (téléchargement compris) | 278,7 s ; au repos 9,7 Go alloués (DiT + VAE), 13,1 Go vus par le pilote |
+| 1024x1024 à froid | 59,8 s (1,20 s/step), pic 26,95 Go réservés (l'encodeur de 16,8 Go est sur la carte pendant l'encodage, puis repart) |
+| 1024x1024 à chaud | **42,7 s (0,855 s/step)**, pic 15,3 Go (prompt en cache d'embeddings : l'encodeur ne revient pas) |
+| 1456x1456 (2 Mpx) | 101,7 s (2,03 s/step), pic 15,6 Go |
+| 2048x1152 | 115,7 s (2,32 s/step), pic 15,7 Go |
+| Encodage d'un prompt | 5,2 s (aller-retour PCIe de l'encodeur compris, noyaux GDN en repli torch) |
+| Décodage VAE | 0,2 à 0,6 s |
+| Stop | image partielle 0,8 s après la demande (step 19 sur 50) |
+| Aperçu live, dernier step | erreur 34,6 sur 255 (matrice FLUX.2 telle quelle), verdict OK |
+
+Contre Ideogram 4 sur la même carte : 1024 en 42,7 s contre 61 s, 2 Mpx en 102 s contre
+394 s pour 4 Mpx (2048x2048 non mesuré ici), pic 15,7 Go contre 23,4. Lecture :
+- Le pic à 27 Go n'arrive que quand l'encodeur est sur la carte (prompt ou négatif
+  nouveau) ; en régime de prompts variés il revient à chaque image, et il reste 5 Go de
+  marge sur 31,8 : un navigateur gourmand suffit à faire déborder. Deux pistes, à
+  mesurer : l'encodeur en nf4 (`--nf4`, bitsandbytes présent) qui ramène ce pic vers
+  16 Go, ou encoder prompt et négatif AVANT de monter le DiT (impossible : le DiT est
+  résident par construction de l'offload 'model' ; l'offload 'sequential' le ferait).
+- Noyaux SDPA à head_dim 128 : `efficient` et `cudnn` oui, `flash` NON sur cette build
+  (torch 2.11 cu128, Blackwell) ; rien à faire côté app.
+- L'encodeur Qwen3.5 tourne avec les replis torch (`flash-linear-attention`,
+  `causal_conv1d` absents) : 5,2 s par prompt, dont le transfert de 16,8 Go. Acceptable ;
+  à comparer au même prompt en nf4.
+- A/B texte : 24 rendus produits dans `bench/lot1/ab/`, verdict de Mike sur `ab.md` en
+  attente.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
