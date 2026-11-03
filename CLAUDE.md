@@ -427,27 +427,34 @@ Contre Ideogram 4 sur la même carte : 1024 en 42,7 s contre 61 s, 2 Mpx en 102 
 
 ### Bilan du lot 1 (03/11/2026) : A/B texte gagné, lot VALIDÉ
 
-Lecture sur images (Mike a envoyé 17 des 24 rendus, lus en session) :
+Lecture sur images des 24 rendus de l'A/B (envoyés par Mike, lus en session) :
 
-| design | rendus vus | texte exact | texte fantôme | banding |
+| design | rendus | textes demandés exacts | texte ajouté non demandé | banding |
 |---|---|---|---|---|
-| logo « BEAN THERE » 1024 | 5 | 5 / 5 | aucun | aucun |
+| logo « BEAN THERE » 1024 | 8 | 8 / 8 | 3 / 8, en texte libre seulement : « COFFEE SHOP » déduit du prompt, dont 2 fautes (« COFE », « COFFE ») | aucun |
 | affiche boulangerie 720x1024 (« GRAND OPENING », « SATURDAY 9 AM · RUE DU PAIN ») | 8 | 8 / 8, point médian et français compris | aucun | aucun |
-| affiche suisse 720x1024 (« 5B », « MOSS, real typography ») | 4 | 4 / 4, virgule comprise | aucun | aucun |
+| affiche suisse 720x1024 (« 5B », « MOSS, real typography ») | 8 | 8 / 8, virgule comprise (une fois sur deux lignes) | aucun | aucun |
 
-17 rendus sur 17 avec tous les textes exacts, y compris les petits textes fixes que le
-test ai-muninn donnait comme point faible. Composition tenue (titre, ruban, panier ;
-numéraux, cercle rouge qui chevauche, légende en bas à gauche), styles variés d'un seed
-à l'autre sans casser le texte, aucun banding sur le SFT à ces tailles. Ideogram 4 avait
-réussi la même affiche au lot 2 en 56 s ; MOSS la rend en 25 s. **Verdict : au moins
-aussi bon qu'Ideogram 4 sur le texte, et plus rapide.** Le texte libre suffit pour
-l'exactitude ; le layout JSON servira au placement, pas à sauver la lisibilité (c'était
-l'inverse sur Ideogram).
+24 rendus sur 24 avec tous les textes demandés exacts, y compris les petits textes fixes
+que le test ai-muninn donnait comme point faible. Composition tenue (titre, ruban,
+panier ; numéraux, cercle rouge qui chevauche, légende en bas à gauche), styles variés
+d'un seed à l'autre sans casser le texte, aucun banding sur le SFT à ces tailles.
+Ideogram 4 avait réussi la même affiche au lot 2 en 56 s ; MOSS la rend en 25 s.
+**Verdict : au moins aussi bon qu'Ideogram 4 sur le texte demandé, et plus rapide.**
+
+Le seul défaut observé, et il est instructif : en TEXTE LIBRE, quand le prompt dit
+« coffee shop logo », le modèle ajoute parfois « COFFEE SHOP » dans l'image sans qu'on
+l'ait demandé, et l'orthographie mal deux fois sur trois (texte fantôme « local », pas
+du charabia en fond). En LAYOUT JSON, où les textes sont listés un par un, aucun ajout
+sur 4 rendus. Conséquences pour le lot 2 : le layout n'est pas qu'un outil de placement,
+c'est la garantie « rien d'autre que ces mots » ; le preset Logo doit passer par lui ;
+et le mode texte libre peut glisser « no other text » quand la légende le permet
+(à mesurer).
 
 Critères d'acceptation du lot 1 remplis : tests CPU sur MOSS miniature, une 2 Mpx sur la
 5090 (1456x1456 en 102 s), A/B jugé. Points ouverts, aucun bloquant : encodeur nf4 non
 mesuré (pic à 27 Go sur un prompt nouveau), temps de chargement depuis le cache non noté
-(le premier passage incluait le téléchargement), 7 rendus de l'A/B non regardés.
+(le premier passage incluait le téléchargement).
 
 ## 10. Sources
 
