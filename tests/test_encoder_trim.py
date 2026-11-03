@@ -99,8 +99,9 @@ def test_trimming_twice_changes_nothing():
 
 def test_the_budget_follows_the_deed_not_the_intent():
     """The bug that cost a full card on klein: 4 GB deducted from a pruning never done.
-    Ideogram 4 reads Qwen3-VL-8B down to its last layer, the pruning is never done, so
-    the flag must change NOTHING in the budget: the nf4 weights' figure."""
+    MOSS-Image reads Qwen3.5-9B down to its last layer, the pruning is never done, so
+    the flag must change NOTHING in the budget: the bf16 weights' figure (DiT 9.5 +
+    encoder 15.6 + VAE 0.2 GiB)."""
     old = (P.BASE_REPO, P._ENCODER_TRIMMED, P.ZIMAGE_TRANSFORMER)
     P.BASE_REPO = P.engine.DEFAULT_REPO
     P.ZIMAGE_TRANSFORMER = None
@@ -110,7 +111,7 @@ def test_the_budget_follows_the_deed_not_the_intent():
         P._ENCODER_TRIMMED = True
         trimmed = P._base_vram_need_gb()
         assert whole == trimmed, (whole, trimmed)
-        assert 14 <= whole <= 17, whole            # ~16 GB of nf4 files
+        assert 24 <= whole <= 27, whole            # ~25 GB of bf16 files
     finally:
         P.BASE_REPO, P._ENCODER_TRIMMED, P.ZIMAGE_TRANSFORMER = old
     print("OK test_the_budget_follows_the_deed_not_the_intent")

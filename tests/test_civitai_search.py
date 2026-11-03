@@ -88,13 +88,14 @@ class _Variant:
         return False
 
 
-# CivitAI's label for Ideogram is not known yet: cz_ui matches an 'ideogram' PREFIX on
-# the normalised label, which both spellings below satisfy. FLUX LoRAs do not load here.
+# CivitAI labels the base "MOSS Image" (read on its own mirror page, 2026-11-03): cz_ui
+# matches a 'mossimage' PREFIX on the normalised label, which both spellings below
+# satisfy. FLUX and Ideogram LoRAs do not load here.
 _PAYLOAD = {"items": [
     _model(1, "Foreign", [_ver(11, "SDXL 1.0")]),
     _model(2, "Klein4B", [_ver(22, "Flux.2 Klein 4B-base")]),
-    _model(3, "Ideo", [_ver(33, "Ideogram 4")]),
-    _model(4, "Ideob", [_ver(44, "Ideogram")]),
+    _model(3, "Mossa", [_ver(33, "MOSS Image")]),
+    _model(4, "Mossb", [_ver(44, "MOSS-Image SFT")]),
     _model(5, "Flux3", [_ver(55, "FLUX.3 Image Klein")]),
 ]}
 
@@ -118,34 +119,33 @@ def test_a_network_failure_is_an_empty_list_not_an_exception():
     assert cz_civitai.search_loras("   ") == []          # empty query: no call at all
 
 
-def test_the_ideogram_versions_come_first():
-    """The ranking: the Ideogram LoRAs first (they load here), then the rest in CivitAI's
+def test_the_moss_versions_come_first():
+    """The ranking: the MOSS LoRAs first (they belong here), then the rest in CivitAI's
     own order. FLUX.2 and FLUX.3 ones rank with the foreign bases: they do not load here."""
     with _Api(_PAYLOAD):
         _q, dd, state, status = cz_ui._ui_civitai_lora_search("x", False)
-    assert _bases(dd) == ["Ideogram 4", "Ideogram", "SDXL 1.0", "Flux.2 Klein 4B-base",
+    assert _bases(dd) == ["MOSS Image", "MOSS-Image SFT", "SDXL 1.0", "Flux.2 Klein 4B-base",
                           "FLUX.3 Image Klein"], _bases(dd)
     assert len(state) == 5
 
 
-def test_ideogram_only_drops_the_other_families_flux_included():
+def test_moss_only_drops_the_other_families_flux_included():
     with _Api(_PAYLOAD):
         _q, dd, _s, _st = cz_ui._ui_civitai_lora_search("x", True)
-    assert _bases(dd) == ["Ideogram 4", "Ideogram"], _bases(dd)
+    assert _bases(dd) == ["MOSS Image", "MOSS-Image SFT"], _bases(dd)
 
 
 def test_the_family_prefix_needs_no_hub_access():
-    """One Ideogram 4 checkpoint, so the prefix is a constant: no network, nothing to
-    degrade."""
+    """One family, so the prefix is a constant: no network, nothing to degrade."""
     fam, cur = cz_ui._klein_base_prefixes()
-    assert fam == cur == "ideogram", (fam, cur)
+    assert fam == cur == "mossimage", (fam, cur)
 
 
 def test_no_result_names_the_filter_as_the_likely_cause():
     with _Api({"items": [_model(1, "Foreign", [_ver(11, "SDXL 1.0")])]}):
         _q, dd, state, status = cz_ui._ui_civitai_lora_search("x", True)
     assert dd["choices"] == [] and state == {}
-    assert "Ideogram only" in status, status
+    assert "MOSS only" in status, status
 
 
 class _Stream:

@@ -1,5 +1,5 @@
-"""crispz-ideogram - the Ideogram 4.0 core (diffusers Ideogram4Pipeline, nf4): loading the
-pipeline (cz_ideogram.IdeogramPipe, behind the same calling convention as crispz-flux3's
+"""crispz-moss - the MOSS-Image core (vendored MOSSImagePipeline, bf16): loading the
+pipeline (cz_moss.MossPipe, behind the same calling convention as crispz-flux3's
 Flux3Pipe) + LoRAs, generation and orchestration (generate / txt2img_run / process_one /
 outpaint / inpaint) + the mutable runtime state.
 
@@ -65,12 +65,13 @@ from cz_core import (
 )
 
 import cz_flux3  # noqa: F401  (family markers; img2img / inpaint helpers for lot 3)
-import cz_ideogram as engine
+import cz_ideogram  # noqa: F401  (family markers of the Ideogram files a shared folder may hold)
+import cz_moss as engine
 
-# The base Ideogram 4.0 model (text to image). Overridden through env IDEOGRAM_MODEL or
-# prefs/config 'ideogram_model'. GATED repo, Ideogram 4 NON-COMMERCIAL licence: accept the
-# conditions on the model page with your HF account and set `hf_token`. See README.
-DEFAULT_BASE_REPO = (os.environ.get("IDEOGRAM_MODEL") or engine.DEFAULT_REPO)
+# The base MOSS-Image model (text to image). Overridden through env MOSS_MODEL or
+# prefs/config 'moss_model'. Public repo, Apache 2.0 (no token, no licence click). An
+# HF token (`hf_token`) is still honoured for rate limits and private mirrors.
+DEFAULT_BASE_REPO = (os.environ.get("MOSS_MODEL") or engine.DEFAULT_REPO)
 # Multi-reference editing has NO separate model on klein: the base pipeline's `image`
 # takes a list of PIL images. The "omni" default is therefore the base model itself
 # (the symbol survives for cz_ui / cz_protocol, see the module docstring).
@@ -99,10 +100,10 @@ if DEVICE == "cuda":
 # so no existing config breaks, and they are reported when they answer.
 # NB: the Python VARIABLES keep their names (ZIMAGE_TRANSFORMER...) - cz_ui, cz_cli and
 # cz_protocol import them, that is the module's API contract (see the docstring).
-# crispz-ideogram: its own keys. The klein_* ones are NOT read: they point at FLUX.2 repos and
-# checkpoints, which do not load in a FLUX.3 pipeline.
-CFG_MODEL_KEY = "ideogram_model"
-CFG_TRANSFORMER_KEY = "ideogram_transformer"
+# crispz-moss: its own keys. The klein_* / flux3_* / ideogram_* ones are NOT read: they
+# point at other families' repos and checkpoints, which do not load in a MOSS pipeline.
+CFG_MODEL_KEY = "moss_model"
+CFG_TRANSFORMER_KEY = "moss_transformer"
 
 
 def _cfg_first(*keys, env=()):
@@ -123,33 +124,33 @@ def _cfg_first(*keys, env=()):
     return None
 
 
-_zmodel = _cfg_first(CFG_MODEL_KEY, env=("IDEOGRAM_MODEL",)) or DEFAULT_BASE_REPO
-ZIMAGE_TRANSFORMER = _cfg_first(CFG_TRANSFORMER_KEY, env=("IDEOGRAM_TRANSFORMER",))
+_zmodel = _cfg_first(CFG_MODEL_KEY, env=("MOSS_MODEL",)) or DEFAULT_BASE_REPO
+ZIMAGE_TRANSFORMER = _cfg_first(CFG_TRANSFORMER_KEY, env=("MOSS_TRANSFORMER",))
 if _is_single_file(_zmodel):
     ZIMAGE_TRANSFORMER = _zmodel
     BASE_REPO = DEFAULT_BASE_REPO
 else:
     BASE_REPO = _zmodel
 if not engine.is_engine_repo(BASE_REPO):
-    _log(f"config: '{BASE_REPO}' is not an Ideogram 4 repo (crispz-ideogram only runs "
-         f"Ideogram 4.0) -> using {DEFAULT_BASE_REPO}")
+    _log(f"config: '{BASE_REPO}' is not a MOSS-Image repo (crispz-moss only runs "
+         f"MOSS-Image) -> using {DEFAULT_BASE_REPO}")
     BASE_REPO = DEFAULT_BASE_REPO
 
 # Transformer precision for the official repos: bf16 (transformer/, ~11 GB), or BFL's
 # pre-quantized fp8r (~6.3 GB, fast from compute capability 8.9) / nvfp4 (~5.3 GB,
 # Blackwell + flashinfer). Ignored when a single-file transformer is set.
-# crispz-ideogram: the only public build is nf4 (the repo carries its quantization
-# config); the key stays so a future bf16 / fp8 build is one entry in engine.PRECISIONS.
-PRECISION = str(os.environ.get("IDEOGRAM_PRECISION") or _prefs.get("ideogram_precision")
-                or CONFIG.get("ideogram_precision") or engine.PRECISIONS[0]).strip().lower()
+# crispz-moss: the precision of the TEXT ENCODER (Qwen3.5-9B: bf16 16.8 GB, or nf4
+# through bitsandbytes, ~5.6 GB); the DiT is always bf16 (cz_moss.PRECISIONS).
+PRECISION = str(os.environ.get("MOSS_PRECISION") or _prefs.get("moss_precision")
+                or CONFIG.get("moss_precision") or engine.PRECISIONS[0]).strip().lower()
 if PRECISION not in engine.PRECISIONS:
-    _log(f"config: ideogram_precision '{PRECISION}' unknown "
+    _log(f"config: moss_precision '{PRECISION}' unknown "
          f"({'/'.join(engine.PRECISIONS)}) -> {engine.PRECISIONS[0]}")
     PRECISION = engine.PRECISIONS[0]
 
 
 def _hf_token():
-    """The HF token for the gated Ideogram 4 repo: env HF_TOKEN, else config `hf_token`."""
+    """An HF token (rate limits, private mirrors): env HF_TOKEN, else config `hf_token`."""
     return (os.environ.get("HF_TOKEN") or CONFIG.get("hf_token") or _prefs.get("hf_token")
             or None)
 
@@ -196,7 +197,7 @@ def _resolve_text_encoder(env, prefs, config):
     """The encoder at startup: env > preferences > config. A key PRESENT in the
     preferences wins even when empty: that is the "Default" choice made in the UI, and a
     config.txt value must not undo it on the next start (a "" used to pass for absent)."""
-    v = str(env.get("KLEIN_TEXT_ENCODER") or "").strip()
+    v = str(env.get("MOSS_TEXT_ENCODER") or env.get("KLEIN_TEXT_ENCODER") or "").strip()
     if v:
         return v
     if CFG_TEXT_ENCODER_KEY in prefs:
@@ -361,7 +362,7 @@ _VRAM_DOWNGRADE = False
 # to 8.0). The variable is kept because cz_ui / cz_cli / cz_protocol read and display it,
 # but _cfg() does NOT pass it to the pipeline any more: it has no effect.
 # Overridable through env KLEIN_CFG (no effect either, kept for symmetry).
-# Ideogram 4: the PEAK of the guidance schedule; no value -> the official 7.0.
+# MOSS-Image: a constant CFG (3.0 official, 3 to 6 advised); no value -> 3.0.
 GUIDANCE = (float(os.environ.get("KLEIN_CFG") or CONFIG.get("default_guidance") or 0)
             or float(engine.SCHEDULE_PEAK))
 
@@ -525,11 +526,10 @@ def _cfg(negative=None, guidance=None):
     a warning on a spec that carries one) -- house rule: degradation announced,
     never silent.
 """
-    # Ideogram 4: the unconditional branch takes no text at all, so there is NO negative
-    # prompt to pass (cz_protocol announces supports.negative = False).
-    if negative:
-        _dbg("negative prompt ignored: Ideogram 4's unconditional branch takes no text")
-    return {}
+    # MOSS-Image: a real CFG with a real negative prompt, encoded by the Qwen3.5 text
+    # encoder (cz_moss.MossPipe remembers the last negative's embeddings, so the same
+    # negative on every image costs the encoder one trip). Empty = the official default.
+    return {"negative_prompt": str(negative or "")}
 
 
 # --- Prompt embedding cache -------------------------------------------------------
@@ -638,10 +638,9 @@ def _qwen_call(pipe, **kw):
     # silence the noise. Should an UNdistilled FLUX.2 checkpoint ever be loaded,
     # is_distilled is false and the UI slider is passed through, becoming a real CFG again.
     need_cfg = False
-    if "guidance_scale" not in kw and isinstance(pipe, engine.IdeogramPipe):
-        # Ideogram 4: the slider is the PEAK of the per-step schedule (7.0 = the official
-        # 7.0 x 45 + 3.0 x 3 at 48 steps); the adapter keeps the schedule's shape for any
-        # step count. Asymmetric CFG always runs (two transformers), whatever the value.
+    if "guidance_scale" not in kw and isinstance(pipe, engine.MossPipe):
+        # MOSS-Image: the slider is a plain CFG (3.0 official); 1.0 skips the negative
+        # branch (one forward a step), anything else runs two.
         kw["guidance_scale"] = float(GUIDANCE)
     if "guidance_scale" not in kw and isinstance(pipe, cz_flux3.Flux3Pipe):
         # FLUX.3: the distilled checkpoint is a FLOW MAP (each step also tells the
@@ -696,10 +695,10 @@ def _qwen_call(pipe, **kw):
                      f"there (measured bit-for-bit identical from 1.0 to 8.0). It does "
                      f"apply on a single-file checkpoint, though.")
             kw["guidance_scale"] = 1.0 if distilled else want
-    # (Not on the FLUX.3 / Ideogram adapters: they take `strength` themselves, and a
+    # (Not on the FLUX.3 / MOSS adapters: they take `strength` themselves, and a
     # white mask would only cost a mask build there.)
     if ("strength" in kw and kw.get("image") is not None and "mask_image" not in kw
-            and not isinstance(pipe, (engine.IdeogramPipe, cz_flux3.Flux3Pipe))):
+            and not isinstance(pipe, (engine.MossPipe, cz_flux3.Flux3Pipe))):
         img = kw["image"]
         ref = img[0] if isinstance(img, (list, tuple)) else img
         kw["mask_image"] = Image.new("L", ref.size, 255)
@@ -824,15 +823,15 @@ def _apply_sampler(pipe):
     generation time."""
     if _BASE_SCHED_CONFIG is None:
         return
-    if isinstance(pipe, engine.IdeogramPipe):
-        # Ideogram 4 sets its own resolution-aware logit-normal sigmas at every call, on a
-        # FlowMatch Euler scheduler: a swapped scheduler or remapped schedule would be
-        # overwritten or fed sigmas it was not trained on. Kept as is, said once.
+    if isinstance(pipe, engine.MossPipe):
+        # MOSS-Image sets its own sigmas at every call (shift 5.0, snapped to the training
+        # grid) on its FlowMatch Euler scheduler: a swapped scheduler or remapped schedule
+        # would be overwritten or fed sigmas it was not trained on. Kept as is, said once.
         if (SAMPLER, SCHEDULE) != ("euler", "sgm_uniform") and \
                 (SAMPLER, SCHEDULE) not in _SAMPLER_IGNORED_SAID:
             _SAMPLER_IGNORED_SAID.add((SAMPLER, SCHEDULE))
-            _log(f"sampler '{SAMPLER}/{SCHEDULE}' not applied: Ideogram 4 runs its native "
-                 f"FlowMatch Euler with a logit-normal schedule.")
+            _log(f"sampler '{SAMPLER}/{SCHEDULE}' not applied: MOSS-Image runs its native "
+                 f"FlowMatch Euler schedule (shift 5.0, snapped to its training grid).")
         return
     if isinstance(pipe, cz_flux3.Flux3Pipe):
         # FLUX.3 runs its own FlowMatch Euler (constant shift 6.93). The distilled
@@ -1386,7 +1385,7 @@ _FLUX2_DIM_SIGS = (("double_stream_modulation_img.lin.weight", 6),
 # the 4096 lane is FLUX.2-klein-9B and nothing else. So the width tells FLUX.3 and the 4B
 # apart from NOTHING: the family is read from the tensor names first (_file_family,
 # _flux3_file_refusal), and the width only serves to NAME a 9B file in a message.
-FLUX3_HIDDEN_DIM = engine.HIDDEN_SIZE   # crispz-ideogram: Ideogram 4 is 4608 wide
+FLUX3_HIDDEN_DIM = engine.HIDDEN_SIZE   # crispz-moss: MOSS-Image is 3072 wide (so is FLUX.3: names decide)
 _FLUX2_VARIANTS = {3072: "4B", 4096: "9B"}
 _BASE_DIM_CACHE = {}
 
@@ -1500,10 +1499,9 @@ def _base_hidden_dim(base=None):
     if base in _BASE_DIM_CACHE:
         return _BASE_DIM_CACHE[base]
     if engine.is_engine_repo(base):
-        # Known without reading anything: every Ideogram 4 repo (official, a mirror) is
-        # 4608 wide (FLUX3_HIDDEN_DIM keeps its crispz-flux3 name for merges). It also
-        # spares the gated repo a config fetch that fails without a token and would
-        # switch the filter off for the session.
+        # Known without reading anything: every MOSS-Image repo (official, a mirror) is
+        # 3072 wide (FLUX3_HIDDEN_DIM keeps its crispz-flux3 name for merges). It also
+        # spares a config fetch that fails offline and would switch the filter off.
         _BASE_DIM_CACHE[base] = FLUX3_HIDDEN_DIM
         return FLUX3_HIDDEN_DIM
     dim = None
@@ -1573,11 +1571,11 @@ def _variant_fix(dim):
     sending them to the wrong place. A FLUX.2 file has no fix HERE: it runs in
     crispz-klein, the studio this one was forked from."""
     if dim == FLUX3_HIDDEN_DIM:
-        return (f"switch the base model to an Ideogram 4 repo (the checkpoint dropdown, "
+        return (f"switch the base model to a MOSS-Image repo (the checkpoint dropdown, "
                 f"or config '{CFG_MODEL_KEY}').")
     if dim in _FLUX2_VARIANTS:
-        return ("run it in crispz-klein: FLUX.2 Klein and Ideogram 4 share neither "
-                "layers nor weights, so no setting of crispz-ideogram loads it.")
+        return ("run it in crispz-klein: FLUX.2 Klein and MOSS-Image share neither "
+                "layers nor weights, so no setting of crispz-moss loads it.")
     return f"point '{CFG_MODEL_KEY}' at the matching base repo."
 
 
@@ -1659,9 +1657,15 @@ def _lora_unsupported(path):
     except Exception:
         fam = None
     if fam and fam != engine.FAMILY:
-        home = {"flux2": "crispz-klein", "flux3": "crispz-flux3"}.get(fam, "its own app")
+        home = {"flux2": "crispz-klein", "flux3": "crispz-flux3",
+                "ideogram": "crispz-ideogram"}.get(fam, "its own app")
         return (f"{_FAMILY_LABEL.get(fam, fam)} LoRA - its layers do not exist in "
-                f"Ideogram 4, peft would match nothing. It works in {home}")
+                f"MOSS-Image, nothing would apply. It works in {home}")
+    if fam == engine.FAMILY:
+        # Lot 1: the vendored pipeline has no LoRA loader and peft knows none of its
+        # modules; crispz-moss brings its own loader in lot 4 (ComfyUI's fused qkv too).
+        return ("MOSS-Image LoRAs are not loadable yet (lot 4 brings the loader); "
+                "listed, not applied")
     algo = _lycoris_algo(path)
     if algo and algo != "LoKr":
         return (f"LyCORIS {algo} - only LoKr is supported here; peft recognises none "
@@ -2113,9 +2117,9 @@ def _load_dequant_state_dict(path):
     # reading as the checkpoint menu (cz_flux3.family_from_keys).
     if engine.family_from_keys(k[len(prefix):] for k, _ in entries) != engine.FAMILY:
         raise RuntimeError(
-            f"{os.path.basename(path)}: quantized checkpoint does not look like an "
-            "Ideogram 4 transformer (different architecture); crispz-ideogram only "
-            "loads Ideogram 4.0.")
+            f"{os.path.basename(path)}: quantized checkpoint does not look like a "
+            "MOSS-Image transformer (different architecture); crispz-moss only "
+            "loads MOSS-Image.")
     # SEQUENTIAL read in the file's PHYSICAL order (data_offsets): a HDD collapses on
     # random access, and the key order does not follow the data's.
     entries.sort(key=lambda kv: kv[1].get("data_offsets", [0])[0])
@@ -2436,10 +2440,13 @@ def _family_refusal(path):
     fam = _file_family(path)
     if fam == "flux2":
         return ("it is a FLUX.2 Klein checkpoint, which runs in crispz-klein: it shares "
-                "neither layers nor weights with Ideogram 4")
+                "neither layers nor weights with MOSS-Image")
     if fam == "flux3":
         return ("it is a FLUX.3 Image Klein checkpoint, which runs in crispz-flux3: it "
-                "shares neither layers nor weights with Ideogram 4")
+                "shares neither layers nor weights with MOSS-Image")
+    if fam == "ideogram":
+        return ("it is an Ideogram 4 checkpoint, which runs in crispz-ideogram: it "
+                "shares neither layers nor weights with MOSS-Image")
     return None
 
 
@@ -2453,15 +2460,20 @@ def _flux3_file_refusal(path):
     if any(_lora_side(n) for n in names[:200]):
         return "it is a LoRA, not a checkpoint: put it in the LoRA folder"
     fam = _file_family(path)
-    if fam in ("flux2", "flux3"):
+    if fam in ("flux2", "flux3", "ideogram"):
         return _family_refusal(path)
     if fam != engine.FAMILY:
-        return ("no Ideogram 4 transformer tensor in it (a VAE, a text encoder, or "
-                "another model family); crispz-ideogram only runs Ideogram 4.0")
-    # An Ideogram 4 transformer in ONE file: diffusers 0.42.1 has no single-file
-    # converter for it. Said in the listing rather than at load time.
-    return ("single-file Ideogram 4 transformers are not supported yet (diffusers has no "
-            "converter for them); use a diffusers folder as the base model")
+        if engine.is_text_encoder_file(path):
+            return ("it is a Qwen3.5 text encoder, not a transformer: set it as the "
+                    "text encoder (Models > Text encoder, or config 'text_encoder')")
+        return ("no MOSS-Image transformer tensor in it (a VAE, a text encoder, or "
+                "another model family); crispz-moss only runs MOSS-Image")
+    # A MOSS-Image DiT in one file (ComfyUI / CivitAI layout): bf16 and int8 ConvRot
+    # load (fused qkv split, dequantized in RAM); the 4-bit builds are refused by name.
+    if _is_gguf_path(path):
+        return ("a GGUF MOSS-Image transformer: not loadable yet (no GGUF reader for this "
+                "family); take the bf16 or int8 .safetensors of the same page")
+    return engine.single_file_refusal(path)
     if not _is_gguf_path(path):
         # A comfy-quant format with no dequant here (w6a8_int8 = 6-bit weights with group
         # scales, the "INT6" builds of CivitAI's FLUX.3 pages): said in the listing, with
@@ -2473,10 +2485,9 @@ def _flux3_file_refusal(path):
         except Exception:
             odd = []
         if odd:
-            return (f"comfy-quant '{odd[0]}' build (6-bit or packed weights): crispz-ideogram "
-                    f"dequantizes the INT8 and FP8 'scaled' builds only. Take the INT8, "
-                    f"bf16 or GGUF file of the same page, or BFL's fp8r / nvfp4 variant "
-                    f"(Precision selector)")
+            return (f"comfy-quant '{odd[0]}' build (6-bit or packed weights): crispz-moss "
+                    f"dequantizes the INT8 and FP8 'scaled' builds only. Take the INT8 "
+                    f"or bf16 file of the same page")
     return None
 
 
@@ -2512,8 +2523,7 @@ def list_checkpoints():
             out.append(rel)
     if flux2_skips:
         _log(f"{flux2_skips} FLUX.2 checkpoint(s) skipped in the checkpoint folder(s): "
-             f"they run in crispz-klein. crispz-ideogram lists FLUX.3 Image Klein "
-             f"transformers only.")
+             f"they run in crispz-klein. crispz-moss lists MOSS-Image transformers only.")
     return sorted(out)
 
 
@@ -2553,7 +2563,7 @@ def resolve_checkpoint(name):
 
 
 _FILE_INFO_CACHE = {}
-_FAMILY_LABEL = {"ideogram": "Ideogram", "flux3": "FLUX.3", "flux2": "FLUX.2"}
+_FAMILY_LABEL = {"moss": "MOSS-Image", "ideogram": "Ideogram", "flux3": "FLUX.3", "flux2": "FLUX.2"}
 _DTYPE_LABEL = {"BF16": "bf16", "F16": "fp16", "F32": "fp32", "F8_E4M3": "FP8",
                 "F8_E5M2": "FP8", "I8": "INT8", "I16": "INT16"}
 # `general.file_type` is llama.cpp's LlamaFileType enum ("MOSTLY_Q4_K_M"...), NOT the
@@ -2972,21 +2982,21 @@ def _resolve_auto(retest=False):
         "auto", footprint_gb=_model_footprint_gb(),
         model_id=(ZIMAGE_TRANSFORMER or BASE_REPO), dtype="bf16",
         profile_path=_hw_profile_path(), retest=retest)
-    mode, why = _ideogram_auto(mode, why, _total_vram_gb())
+    mode, why = _moss_auto(mode, why, _total_vram_gb())
     _AUTO_OFFLOAD = mode
     _log(f"offload auto -> {mode} ({why})")
     return mode
 
 
-def _ideogram_auto(mode, why, total_gb):
-    """Ideogram 4: 'auto' prefers 'model' (encoder-only offload) over 'none' on cards
+def _moss_auto(mode, why, total_gb):
+    """MOSS-Image: 'auto' prefers 'model' (encoder-only offload) over 'none' on cards
     under engine.AUTO_NONE_MIN_VRAM_GB. The VRAM test only knows the weights fit; the
-    2048 px denoise needs the 5.5 GB the encoder would hold for nothing between prompts.
-    An explicit 'none' is never touched (this runs for 'auto' only)."""
+    2 Mpx denoise needs the 16.8 GB (bf16) the encoder would hold for nothing between
+    prompts. An explicit 'none' is never touched (this runs for 'auto' only)."""
     if mode == "none" and total_gb and total_gb < engine.AUTO_NONE_MIN_VRAM_GB:
-        return "model", (f"{why}; Ideogram 4 on {total_gb:.0f} GB: text encoder offloaded "
-                         f"to keep 2048 px renders clear of the VRAM ceiling, explicit "
-                         f"'none' to override")
+        return "model", (f"{why}; MOSS-Image on {total_gb:.0f} GB: text encoder offloaded "
+                         f"between prompts to keep the large renders clear of the VRAM "
+                         f"ceiling, explicit 'none' to override")
     return mode, why
 
 
@@ -3290,6 +3300,14 @@ def latent_preview_image(latents, width=0, height=0, proj=None):
     None when the two do not agree -- better no preview than a scrambled one.
     `proj` = (M, b) replaces the FLUX.2 matrix (Ideogram 4, see _ideogram_preview_proj)."""
     z = latents[0].detach().float()
+    if z.dim() == 3 and z.shape[0] == len(_LATENT_RGB):
+        # MOSS-Image hands its latents as (B, 128, h, w): the same 128 bn-normalized
+        # channels in the FLUX order, with the grid explicit. Flattened to tokens here.
+        c, h4, w4 = z.shape
+        if width and height and (int(height) // 16, int(width) // 16) != (h4, w4):
+            return None
+        z = z.permute(1, 2, 0).reshape(h4 * w4, c)
+        width, height = w4 * 16, h4 * 16
     if z.dim() != 2:
         return None
     seq = z.shape[0]
@@ -3397,7 +3415,7 @@ def free_vram():
     # for a fresh pipe by _qwen_call / _refine_whole (see _fresh).
     for _p in {id(x): x for x in [_BASE_PIPE, *(_DERIVED or {}).values()]
                if x is not None}.values():
-        if hasattr(_p, "release") and isinstance(_p, engine.IdeogramPipe):
+        if hasattr(_p, "release") and isinstance(_p, engine.MossPipe):
             _p.release()
     _BASE_PIPE = None
     _DERIVED = {}
@@ -3657,11 +3675,12 @@ _TRANSFORMER_VRAM_GB = {"4B": 7.2, "9B": 18.2}
 # 8.27 + the VAE 0.31, plus the transformer at its precision. The sums match the
 # "peak after load" of the diffusers blog (18.8 bf16 / 14.35 fp8r / 13.4 nvfp4), which is
 # what 'none' offload keeps resident.
-# crispz-ideogram: Ideogram 4 nf4, from the repo's file sizes (GiB): Qwen3-VL-8B encoder
-# 5.1 + VAE 0.16 = the "rest", and the PAIR of transformers (conditional +
-# unconditional, 4.86 each) as the "transformer". To be replaced by the 5090 measures.
-_FLUX3_REST_GB = 5.3
-_FLUX3_TRANSFORMER_GB = {"nf4": 9.7, "bf16": 9.7}
+# crispz-moss: MOSS-Image from the repo's file sizes (GiB): the Qwen3.5-9B encoder 15.6
+# in bf16 (~5.6 in nf4) + the VAE 0.23 = the "rest" (by the ENCODER precision), and the
+# DiT 9.5 as the "transformer". To be replaced by the 5090 measures.
+_MOSS_REST_GB = {"bf16": 15.9, "nf4": 5.9}
+_FLUX3_REST_GB = _MOSS_REST_GB["bf16"]
+_FLUX3_TRANSFORMER_GB = {"bf16": 9.5, "nf4": 9.5}
 
 
 def _base_vram_need_gb(base=None):
@@ -3672,14 +3691,17 @@ def _base_vram_need_gb(base=None):
     is dequantized at load time).
 """
     t = ZIMAGE_TRANSFORMER
+    rest = _MOSS_REST_GB.get(PRECISION, _FLUX3_REST_GB)
+    if TEXT_ENCODER and _looks_single_file(TEXT_ENCODER):
+        rest = _MOSS_REST_GB["bf16"]          # a single-file encoder is dequantized to bf16
     if not t:
-        return _FLUX3_REST_GB + _FLUX3_TRANSFORMER_GB.get(PRECISION, 9.7)
+        return rest + _FLUX3_TRANSFORMER_GB["bf16"]
     if _is_gguf_path(t) or engine._bfl_quant_of(t):
         try:
-            return _FLUX3_REST_GB + os.path.getsize(t) / 1024 ** 3
+            return rest + os.path.getsize(t) / 1024 ** 3
         except OSError:
             pass
-    return _FLUX3_REST_GB + _FLUX3_TRANSFORMER_GB["bf16"]
+    return rest + _FLUX3_TRANSFORMER_GB["bf16"]
 
 
 def _total_vram_gb():
@@ -3755,11 +3777,12 @@ def _trim_text_encoder(pipe):
     _ENCODER_TRIMMED = False        # a new encoder: nothing pruned until we have acted
     if not TRIM_TEXT_ENCODER:
         return
-    if isinstance(pipe, engine.IdeogramPipe):
-        # Ideogram 4 taps 13 hidden states of Qwen3-VL-8B, the last one at layer 35 of
-        # 36: there is nothing to prune. Said, so the setting is not believed to act.
-        _log("text encoder NOT trimmed: Ideogram 4 reads Qwen3-VL-8B down to its last "
-             "layer, there is nothing to remove.")
+    if isinstance(pipe, engine.MossPipe):
+        # MOSS-Image reads the LAST hidden state of Qwen3.5-9B and the encoder is
+        # loaded without its lm_head already: there is nothing to prune. Said, so the
+        # setting is not believed to act.
+        _log("text encoder NOT trimmed: MOSS-Image reads Qwen3.5-9B down to its last "
+             "layer (no lm_head loaded), there is nothing to remove.")
         return
     if isinstance(pipe, cz_flux3.Flux3Pipe):
         # FLUX.3 reads 8 hidden states of Qwen3-VL-4B, the last one at layer 32 of 36:
@@ -3868,13 +3891,18 @@ def _load_transformer(path=None, base=None):
 """
     path = ZIMAGE_TRANSFORMER if path is None else path
     base = BASE_REPO if base is None else base
-    # crispz-ideogram: the base repo's conditional transformer, or a named refusal for a
-    # single file (no diffusers converter for Ideogram 4). The FLUX.3 path below stays for
-    # merges from crispz-flux3 and is not reached.
+    # crispz-moss: the base repo's DiT, or a ComfyUI / CivitAI single file read by the
+    # engine (bf16 or int8 ConvRot, fused qkv split, refusals by name). The FLUX.3 path
+    # below stays for merges from crispz-flux3 and is not reached.
     if path and _is_single_file(path):
-        raise RuntimeError(f"{os.path.basename(path)}: "
-                           f"{_flux3_file_refusal(path) or 'not loadable here'}")
-    return _load_monitor(f"transformer {base} ({PRECISION})",
+        why = _flux3_file_refusal(path)
+        if why:
+            raise RuntimeError(f"{os.path.basename(path)}: {why}")
+        return _load_monitor(f"transformer {os.path.basename(path)}",
+                             lambda: engine.load_transformer(base, DTYPE, precision=PRECISION,
+                                                             single_file=path,
+                                                             token=_hf_token()))
+    return _load_monitor(f"transformer {base} (bf16)",
                          lambda: engine.load_transformer(base, DTYPE, precision=PRECISION,
                                                          token=_hf_token()))
     src = path or None
@@ -4523,17 +4551,20 @@ def _ensure_base():
     tr = None
     if ZIMAGE_TRANSFORMER:
         tr = _load_transformer()
-    # A replacement text encoder is not supported: Ideogram 4 reads 13 hidden states of
-    # its Qwen3-VL-8B. The setting is kept (prefs stay valid) but not applied, and said.
+    # A replacement text encoder: any Qwen3.5-9B in transformers format (a folder, an HF
+    # repo, an 'abliterated' fine-tune...) or a ComfyUI / CivitAI single file (bf16 or
+    # int8 ConvRot). A failure is a hard error: the user asked for THAT encoder.
     _TEXT_ENCODER_ACTIVE = ""
+    te = None
     if TEXT_ENCODER:
-        _log(f"text encoder {_encoder_label(TEXT_ENCODER)} NOT used: replacing the encoder "
-             f"is not supported on Ideogram 4. {BASE_REPO}'s own Qwen3-VL-8B runs; the "
-             f"image metadata says so (text_encoder_not_applied).")
+        te = _load_monitor(f"text encoder {_encoder_label(TEXT_ENCODER)}",
+                           lambda: engine.load_text_encoder(TEXT_ENCODER, DTYPE, PRECISION,
+                                                            _hf_token(), config_repo=BASE_REPO))
+        _TEXT_ENCODER_ACTIVE = TEXT_ENCODER
     _need = _base_vram_need_gb()
     _off_label = (f"auto->{_resolve_auto()}" if OFFLOAD_MODE == "auto" else OFFLOAD_MODE)
     _log(f"loading {engine.MODEL_LABEL}: {BASE_REPO} "
-         f"(offload={_off_label}, dtype=bf16, transformers={PRECISION}"
+         f"(offload={_off_label}, dtype=bf16, text encoder={PRECISION}"
          + (f", ~{_need:.0f} GB of weights" if _need else "")
          + ") ... first run downloads it from HF, then cached")
     try:
@@ -4543,7 +4574,8 @@ def _ensure_base():
         _variant = engine.variant_of(BASE_REPO)
         pipe = _load_monitor(f"{engine.MODEL_LABEL} {BASE_REPO}",  # noqa: E128
                              lambda: engine.load(BASE_REPO, dtype=DTYPE, precision=PRECISION,
-                                                 transformer=tr, token=_hf_token()))
+                                                 transformer=tr, text_encoder=te,
+                                                 token=_hf_token()))
     except Exception as e:
         hint = _hf_access_hint(BASE_REPO, e)
         if hint:
@@ -4630,7 +4662,7 @@ def get_pipe(kind="img2img"):
     if kind in _DERIVED:
         _dbg(f"get_pipe('{kind}'): reuse derived")
         return _DERIVED[kind]
-    if isinstance(base, (engine.IdeogramPipe, cz_flux3.Flux3Pipe)):
+    if isinstance(base, (engine.MossPipe, cz_flux3.Flux3Pipe)):
         # FLUX.3: ONE object does everything -- img2img (strength = SDEdit on the flow
         # path) and inpaint (mask = per-step latent blending) live in the adapter. No
         # derived pipeline, no second copy of anything.
@@ -5524,7 +5556,7 @@ def source_meta(items, key="source"):
 def _gen_meta(mode, prompt, negative="", seed=None, steps=None, guidance=None,
               size=None, model=None, styles=None, extra=None):
     """Builds the generation metadata dict (for the sidecar/PNG)."""
-    m = {"app": "crispz-ideogram", "mode": mode, "prompt": prompt or "",
+    m = {"app": "crispz-moss", "mode": mode, "prompt": prompt or "",
          "negative": negative or "", "date": _now_stamp()}
     if seed is not None and int(seed) >= 0:
         m["seed"] = int(seed)

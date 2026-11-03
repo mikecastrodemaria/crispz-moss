@@ -62,8 +62,8 @@ def _tiny(path, prescaled, both=False):
           "x_embedder.weight_scale": s1.float(),
           "context_embedder.weight": (w2 if both else w2 / s2).to(E4),
           "context_embedder.weight_scale": s2.float(),
-          # an Ideogram 4 block name: the loader checks the family before reading anything
-          "llm_cond_proj.bias": torch.zeros(2, dtype=torch.bfloat16)}
+          # a MOSS-Image block name: the loader checks the family before reading anything
+          "video_embedder.bias": torch.zeros(2, dtype=torch.bfloat16)}
     save_file(sd, path)
     return w1, w2
 

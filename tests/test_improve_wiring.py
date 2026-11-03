@@ -161,7 +161,7 @@ def test_ui_detect_lists_text_models_for_improve():
 
 def test_negative_improve_is_hidden_on_klein():
     import cz_ui
-    assert cz_ui.IMPROVE_NEGATIVE_UI is False
+    assert cz_ui.IMPROVE_NEGATIVE_UI is True       # MOSS-Image: a real negative prompt
 
 
 def test_think_is_disabled_and_klein_options_travel():

@@ -1,8 +1,24 @@
 # Changelog
 
-All notable changes to crispz-ideogram. The entries from "Unreleased (crispz-flux3)" down
-are crispz-flux3's history, and below its 0.1.0 crispz-klein's, kept as is.
+All notable changes to crispz-moss. The "0.1.0 (crispz-ideogram)" entry and the ones
+below it are crispz-ideogram's, crispz-flux3's and crispz-klein's history, kept as is.
 The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browser tab title.
+
+
+## 0.1.0-dev (crispz-moss, in progress) : crispz-ideogram ported to MOSS-Image
+
+The specification, decisions and measurements of every lot are in CLAUDE.md.
+
+- **Lot 1, local engine** (2026-11-03): `cz_moss.MossPipe` around the vendored
+  OpenMOSS `MOSSImagePipeline` (`third_party/moss_image/`, Apache 2.0, never
+  `trust_remote_code`), subclassed to add the step-end callback, Stop and an explicit
+  sigma schedule. bf16 DiT, Qwen3.5-9B text encoder in bf16 or nf4, FLUX.2 VAE in fp32.
+  50 steps, CFG 3.0, a real negative prompt (the last negative's embeddings remembered),
+  encoder-only `model` offload, live preview on the (B, 128, h, w) latents. Single
+  files in the ComfyUI / CivitAI layout: the DiT (bf16, int8 ConvRot, fused qkv) and
+  the text encoder (bf16, int8 ConvRot), the 4-bit builds refused by name. Protocol:
+  `crispz-moss`, negative on, img2img / inpaint off until lot 3, no cloud. GPU script
+  `tools/gpu_lot1_check.py` with the text A/B against the crispz-ideogram posters.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0

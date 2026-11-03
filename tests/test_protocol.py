@@ -125,7 +125,7 @@ def test_validate_refs_dropped_with_warning_when_unavailable():
         spec, warnings = cp.validate_spec(
             {"protocol": 1, "prompt": "x", "refs": ["a.png"]})
     assert spec["refs"] == []
-    assert any("ref(s) ignored" in w and "Ideogram 4" in w for w in warnings), warnings
+    assert any("ref(s) ignored" in w and "MOSS-Image" in w for w in warnings), warnings
 
 
 def test_validate_refs_missing_file_is_code_2():

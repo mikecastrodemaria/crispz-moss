@@ -408,10 +408,12 @@ def test_settings_save_switches_on_and_never_echoes_the_key(off, monkeypatch, tm
     assert not ok and saved["ideogram_api_key"] == KEY, "an empty key field keeps the saved key"
 
 
-def test_protocol_caps_report_the_cloud_without_running_it(on):
+def test_protocol_caps_never_report_a_cloud_on_crispz_moss(on):
+    """crispz-moss: the Ideogram cloud module is dead code kept for the merges; even with
+    the switch on, the protocol reports no cloud at all (nothing leaves the machine)."""
     import cz_protocol
     c = cz_protocol.caps_dict()["supports"]["cloud"]
-    assert c["enabled"] and "edit" in c["ops"] and c["via"] == "ui"
+    assert c["enabled"] is False and c["ops"] == [] and "crispz-moss" in c["why"]
 
 
 # --- Hidden while off (Mike, 02/11/2026: the studio is used locally) --------------------------

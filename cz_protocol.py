@@ -48,7 +48,7 @@ from cz_core import CONFIG, APP_VERSION, _log
 from prompt_variants import has_variants
 
 PROTOCOL = 1
-TOOL = "crispz-ideogram"
+TOOL = "crispz-moss"
 # The op vocabulary of protocol v1: frozen, identical in every family
 # tool. czp accepts all of it on the command line so that an op THIS tool
 # does not implement still gets a JSON answer with exit code 3 - a machine
@@ -61,12 +61,12 @@ OPS = ("caps", "gen", "upscale", "edit", "inpaint")
 # it). Static on purpose: `caps` must answer without importing the pipeline
 # (torch). Krea 2 has no img2img / inpaint pipeline -> variation (upscale
 # with factor 1) and inpaint are refused with exit 3, never faked.
-# crispz-ideogram: Ideogram 4.0 has neither img2img nor inpaint in diffusers; both are
-# EMULATED since lot 3 (SDEdit on the tail of Ideogram's own schedule, latent blending
-# for the mask, cz_ideogram._prepare_emulated). `caps` says so in supports.emulated: a
-# caller that needs a native pipeline can tell.
-FAMILY_CAPS = {"img2img": True, "inpaint": True}
-EMULATED_CAPS = ("img2img", "inpaint")
+# crispz-moss: MOSS-Image is text to image only. img2img and inpaint will be EMULATED in
+# lot 3 (SDEdit on the tail of the native schedule, latent blending for the mask, the
+# crispz-ideogram technique); until then both are refused with exit 3, never faked.
+# `caps` lists the emulated ones in supports.emulated once they exist.
+FAMILY_CAPS = {"img2img": False, "inpaint": False}
+EMULATED_CAPS = ()
 
 # Spec fields known to the protocol (v1). An unknown field is a warning,
 # never an error: a spec written for another family tool must go through.
@@ -77,7 +77,7 @@ SPEC_FIELDS = ("protocol", "op", "prompt", "negative", "width", "height",
 
 _DEF_URL = "http://127.0.0.1:7860"
 
-MAX_REFS = 10                     # kept for the family contract; Ideogram 4 takes no reference (OMNI_SUPPORTED)
+MAX_REFS = 10                     # kept for the family contract; MOSS-Image takes no reference (OMNI_SUPPORTED)
 
 # spec.fast (op edit) -> the mode name on the cz_pipeline.set_edit_speed side
 # klein has no speed preset: the model is already distilled to 4 steps and no FLUX.2
@@ -93,21 +93,21 @@ _FAST_ALIASES = {"off": "Off", "none": "Off", "auto": "Auto (model profile)",
 # crispz-krea / crispz-krea2 hard-set this to False (their _load_omni raises:
 # no instruction-edit model exists for Krea) - config can never turn refs on
 # there, and caps must say so instead of promising a capability that raises.
-# crispz-ideogram: Ideogram 4.0 is text to image only. Editing is local in crispz-flux3
-# and cloud (Ideogram 4.5 API, opt-in) in lot 4.
+# crispz-moss: MOSS-Image is text to image only. Editing is local in crispz-flux3
+# (Edit in crispz-flux3 tab); reference editing through a community LoRA is lot 4.
 OMNI_SUPPORTED = False
 # klein serves multi-reference editing from the BASE pipeline (`image` takes a list of
 # PIL images): there is no separate edit repo to configure, so refs are ALWAYS available.
-OMNI_DEFAULT = (os.environ.get("IDEOGRAM_MODEL")
-                or "ideogram-ai/ideogram-4-nf4-diffusers")
+OMNI_DEFAULT = (os.environ.get("MOSS_MODEL")
+                or "OpenMOSS-Team/MOSS-Image-SFT")
 
 # klein-4B is step-wise distilled: diffusers ignores `guidance_scale` (measured
 # bit-identical renders from 1.0 to 8.0, tests/test_klein_guidance.py) and the
 # Flux2Klein* pipelines expose no `negative_prompt`. A spec carrying `negative` is
 # therefore honoured with a WARNING, never silently - house rule.
-# crispz-ideogram: Ideogram 4's unconditional transformer takes NO text (asymmetric CFG):
-# there is nowhere to put a negative prompt. Announced, never silently dropped.
-SUPPORTS_NEGATIVE = False
+# crispz-moss: MOSS-Image runs a real CFG with a real negative prompt (encoded by its
+# Qwen3.5 text encoder; empty by default, the user guide suggests a tag preset).
+SUPPORTS_NEGATIVE = True
 
 
 def _omni_configured():
@@ -249,15 +249,9 @@ def caps_dict():
 
 
 def _cloud_caps():
-    """The Ideogram cloud functions (lot 4): reported, never run through the protocol (the
-    data would leave the machine on a caller's request). `ops` is empty while they are off."""
-    try:
-        import cz_ideogram_api as api
-        ok, why = api.status()
-        return {"enabled": ok, "where": api.WHERE, "via": "ui",
-                "ops": list(api.OPS) if ok else [], **({} if ok else {"why": why})}
-    except Exception as e:
-        return {"enabled": False, "ops": [], "why": f"unavailable: {e}"}
+    """No cloud on crispz-moss: MOSS-Image has no hosted API and nothing leaves the
+    machine. The field stays (family contract), always off."""
+    return {"enabled": False, "ops": [], "why": "no cloud function on crispz-moss"}
 
 
 def _edit_lora_catalog():
@@ -452,8 +446,7 @@ def validate_spec(spec, op="gen"):
     if out["negative"] and not SUPPORTS_NEGATIVE:
         # klein is step-wise distilled: no CFG -> no negative prompt. We say so
         # instead of letting the caller believe it acts (degradation announced, never silent).
-        warnings.append("'negative' ignored: klein is a distilled model (no CFG, "
-                        "no negative_prompt) - see supports.negative")
+        warnings.append("'negative' ignored by this model - see supports.negative")
         out["negative"] = ""
     for key, default in (("width", 1024), ("height", 1024)):
         try:
@@ -487,11 +480,11 @@ def validate_spec(spec, op="gen"):
     # (crispz-klein warned here that guidance had no effect: true of a distilled model,
     # false of Ideogram 4, where it is the peak of the per-step schedule. Removed.)
     refs = [str(r) for r in (spec.get("refs") or []) if str(r).strip()]
-    # Ideogram 4 takes no reference image: refs are dropped WITH a warning that says
-    # where reference editing lives (crispz-flux3 locally, the Ideogram cloud in lot 4).
+    # MOSS-Image takes no reference image: refs are dropped WITH a warning that says
+    # where reference editing lives (crispz-flux3 locally).
     if refs and not _omni_configured():
-        warnings.append(f"{len(refs)} ref(s) ignored: Ideogram 4 takes no reference "
-                        f"image (reference editing: crispz-flux3, or the Ideogram cloud)")
+        warnings.append(f"{len(refs)} ref(s) ignored: MOSS-Image takes no reference "
+                        f"image (reference editing: crispz-flux3)")
         refs = []
     if len(refs) > MAX_REFS:
         warnings.append(f"{len(refs)} refs, keeping the first {MAX_REFS} "

@@ -167,9 +167,9 @@ ASPECT_RATIOS = {
     "4K  2304 x 3456  (2:3)":    (2304, 3456),
     "4K  4096 x 1760  (21:9)":   (4096, 1760),
 }
-# crispz-ideogram: Ideogram 4 renders 256 to 2048 px a side (cz_ideogram.fit_size). The
-# FLUX.3 2K/4K formats above 2048 would be shrunk silently-but-logged at every render, so
-# they are not offered. Lot 2 redoes this list with the design presets (6:1 banner...).
+# crispz-moss: MOSS-Image renders 256 to 2048 px a side, 4 Mpx at most (cz_moss.fit_size).
+# The FLUX.3 2K/4K formats above 2048 would be shrunk silently-but-logged at every render,
+# so they are not offered. Lot 2 redoes this list with the design presets (6:1 banner...).
 ASPECT_RATIOS = {k: v for k, v in ASPECT_RATIOS.items() if max(v) <= 2048}
 # A list sorted from the squarest to the widest, each format followed by its portrait
 # counterpart. The 1536 entries (3:2, 16:9) and the 5:4 / 4:3 ones are EXACT ratios, the ones
@@ -188,10 +188,11 @@ _LIVE_PREVIEW_POLL = 0.25
 # FLUX.3: the distilled checkpoint is a 16-step flow map (BFL's recipe, no CFG); 8 steps is
 # a draft mode to be measured on the 5090; the undistilled -base checkpoint wants 50 steps
 # and a real CFG of 3.5 (model card). The same three live in config-sample.txt.
+# crispz-moss: MOSS-Image's official 50 steps / CFG 3.0, and a draft; the same two live in
+# config-sample.txt (performance_presets wins when the config defines it).
 PERFORMANCE = {
-    "Distilled (16 steps)": (16, 1.0),
-    "Fast (8 steps)":       (8, 1.0),
-    "Base (50 steps, CFG 3.5)": (50, 3.5),
+    "MOSS (50 steps)": (50, 3.0),
+    "Draft (25 steps)": (25, 3.0),
 }
 # Styles. Fooocus format: name -> {"prompt": a template with {prompt} (or None),
 # "negative_prompt": str}. The real library is loaded from styles/*.json (see _load_styles
@@ -603,14 +604,15 @@ def _refresh_models(new_dir):
 # dropdown: choosing a base repo = a COMPLETE swap (transformer + VAE + Qwen3-VL encoder).
 # crispz-klein's `klein_base_repos` and crispz-flux3's `flux3_base_repos` are NOT read:
 # their values are FLUX repos, which this build refuses anyway.
-# crispz-ideogram: ONE Ideogram 4 checkpoint. The two names stay (the selector code and
-# merges from crispz-flux3 use them) and point at the same repo; the Distilled/Base
-# selector is hidden. Config `ideogram_base_repos` can list mirrors or local folders.
-import cz_ideogram
-FLUX3_DISTILLED = cz_ideogram.DEFAULT_REPO
-FLUX3_BASE = cz_ideogram.DEFAULT_REPO
-ZIMAGE_BASE_REPOS = [r for r in (CONFIG.get("ideogram_base_repos")
-                                 or [cz_ideogram.DEFAULT_REPO])
+# crispz-moss: two official MOSS-Image checkpoints, SFT (the default) and Base. The two
+# FLUX3_* names stay (the selector code and merges from crispz-flux3 use them): 'Base'
+# maps to MOSS-Image-Base, 'Distilled' (the default) to the SFT. Config `moss_base_repos`
+# can add mirrors or local folders.
+import cz_moss
+FLUX3_DISTILLED = cz_moss.DEFAULT_REPO
+FLUX3_BASE = cz_moss.BASE_REPO
+ZIMAGE_BASE_REPOS = [r for r in (CONFIG.get("moss_base_repos")
+                                 or list(cz_moss.MOSS_REPOS))
                      if isinstance(r, str) and r.strip()]
 # A base repo coming from the config/prefs must stay selectable even when it is absent
 # from the list: otherwise the dropdown shows one model while the pipeline uses another (and
@@ -626,14 +628,21 @@ _KOMMUNITY = ("**FLUX Kommunity License**: free, commercial use included, under 
               "READ token (config `hf_token` or env HF_TOKEN). VRAM, BFL's figures to be "
               "measured here: about 19 GB all-in in bf16, 14.4 in fp8r, 13.5 in nvfp4 "
               "(the Precision selector); below that, set CPU offload to `model`.")
-_IDEOGRAM_NOTE = ("**Ideogram 4 NON-COMMERCIAL licence**: personal and research use only; "
-                  "commercial use of these self-hosted weights needs a separate licence from "
-                  "Ideogram. The repo is **gated**: accept the conditions at "
-                  "https://huggingface.co/{repo} with your HF account, then set a READ token "
-                  "(config `hf_token` or env HF_TOKEN). 48 steps, guidance schedule peaking "
-                  "at 7.0, no negative prompt. nf4 weights about 16 GB on disk; VRAM to be "
-                  "measured on the 5090, set CPU offload to `model` below 24 GB.")
-BASE_REPO_NOTES = {cz_ideogram.DEFAULT_REPO: _IDEOGRAM_NOTE.format(repo=cz_ideogram.DEFAULT_REPO)}
+_MOSS_NOTE = ("**Apache 2.0** (weights and pipeline code): commercial use allowed, attribution "
+              "kept. Public repo, no token needed (https://huggingface.co/{repo}). 50 steps, "
+              "CFG 3.0 (3 to 6), real negative prompt. About 27 GB on disk in bf16 (DiT 10.2, "
+              "Qwen3.5-9B encoder 16.8, VAE 0.25); on a 32 GB card the encoder leaves between "
+              "prompts (CPU offload `model` or `auto`). {which}")
+BASE_REPO_NOTES = {
+    cz_moss.DEFAULT_REPO: _MOSS_NOTE.format(
+        repo=cz_moss.DEFAULT_REPO,
+        which="SFT: the supervised fine-tune, clearer text grouping; known vertical banding "
+              "on some renders (a DeBand LoRA exists, lot 4)."),
+    cz_moss.BASE_REPO: _MOSS_NOTE.format(
+        repo=cz_moss.BASE_REPO,
+        which="Base: the pretrained checkpoint LoRAs are trained on, rawer compositions, "
+              "no banding."),
+}
 # The default Performance preset for each official base repo. Empty: profile_for_model()
 # decides from the name (flux-3-image-klein-base -> 50 / 3.5, flux-3-image-klein -> 16 /
 # 1.0, see cz_core) and _perf_update picks the matching preset. NB: do NOT put a preset
@@ -869,19 +878,19 @@ def _apply_variant(v):
     the menu used to do -- transformer, VAE and text encoder all change. Already on that
     checkpoint -> nothing moves, so clicking the current one never costs a reload."""
     repo = FLUX3_BASE if str(v).strip().lower().startswith("base") else FLUX3_DISTILLED
-    if repo == cz_pipeline.BASE_REPO or repo == cz_ideogram.DEFAULT_REPO:
-        # crispz-ideogram: one checkpoint, the (hidden) selector never swaps anything.
+    if repo == cz_pipeline.BASE_REPO:
+        # The selector is hidden on crispz-moss (the repo dropdown does the same swap).
         return (gr.update(),) * 6
     return _apply_checkpoint(repo)
 
 
 def _ui_set_precision(p):
-    """The Precision selector (hidden: Ideogram 4 publishes nf4 only). Persisted
+    """The text-encoder Precision selector (bf16 / nf4). Persisted
     in the preferences; the swap happens on the next run (the cache key carries it)."""
     before = cz_pipeline.PRECISION
     now = cz_pipeline.set_precision(p)
     try:
-        _save_prefs_keys({"ideogram_precision": now})
+        _save_prefs_keys({"moss_precision": now})
     except Exception as e:
         _dbg(f"precision not persisted: {e}")
     if now == before:
@@ -1325,10 +1334,9 @@ def _klein_base_prefixes():
     load on a 9B base, cz_pipeline refuses it with its reason. The variant is only used to
     ORDER and to filter on request; reading it must never break a search, hence the except.
     """
-    # One Ideogram 4 checkpoint: the family IS the current variant. CivitAI's label for it
-    # is not known yet; 'Ideogram' as a prefix matches "Ideogram", "Ideogram 4"... until a
-    # real sidecar says otherwise.
-    fam = cz_civitai._norm_base("Ideogram")
+    # One family: CivitAI labels the base model "MOSS Image" (its own mirror page and the
+    # community merges, read on 2026-11-03).
+    fam = cz_civitai._norm_base("MOSS Image")
     return fam, fam
 
 
@@ -1355,7 +1363,7 @@ def _ui_civitai_lora_search(query, klein_only):
         cands = [c for c in cands
                  if cz_civitai._norm_base(c.get("baseModel")).startswith(fam)]
     if not cands:
-        hint = (" with an Ideogram base, untick 'Ideogram only' to see the other bases "
+        hint = (" with a MOSS Image base, untick 'MOSS only' to see the other bases "
                 "(they will not load here)." if klein_only else
                 ". Check the spelling, or the model may not be on CivitAI.")
         return (gr.update(value=q), gr.update(choices=[], value=None), {},
@@ -1534,7 +1542,7 @@ def _ui_detect_improve_models(url):
 
 
 # Negative Improve in the UI: hidden when the negative has no effect on the model.
-IMPROVE_NEGATIVE_UI = False
+IMPROVE_NEGATIVE_UI = True
 
 
 def _ui_detect_ollama(url):
@@ -3988,7 +3996,7 @@ def _preset_switch_base(data):
         return ""
     if want not in ZIMAGE_BASE_REPOS:
         return (f"\n\n⚠ This preset was saved on the base repo `{want}`, which is not "
-                f"offered here (config `ideogram_base_repos`). The base was left on "
+                f"offered here (config `moss_base_repos`). The base was left on "
                 f"`{cz_pipeline.BASE_REPO}`.")
     was = cz_pipeline.BASE_REPO
     set_zimage_transformer("")
@@ -4192,7 +4200,7 @@ def build_ui():
     import cz_protocol as _czproto
     omni_on = _czproto.OMNI_SUPPORTED and bool((cz_pipeline.OMNI_MODEL or "").strip())
 
-    with gr.Blocks(title=f"crispz-ideogram {APP_VERSION}", theme=gr.themes.Default(), css=FOOOCUS_CSS,
+    with gr.Blocks(title=f"crispz-moss {APP_VERSION}", theme=gr.themes.Default(), css=FOOOCUS_CSS,
                    js=js_full, head=_ui_head()) as demo:
         # The output folder's gallery opens in a new tab (the Asset Browser), through
         # the button under the preview. No inline gallery panel.
@@ -4283,12 +4291,12 @@ def build_ui():
                     btn = gr.Button("Generate", elem_id="cz_generate", scale=1, min_width=150)
 
                 with gr.Row(equal_height=True):
-                    # crispz-ideogram: kept (the handlers and the queue carry it) but greyed
-                    # out, with the reason in its placeholder: Ideogram 4's unconditional
-                    # transformer takes no text, there is nowhere to put a negative prompt.
-                    negative = gr.Textbox(show_label=False, value="", interactive=False,
+                    # crispz-moss: a real negative prompt (MOSS-Image runs a real CFG).
+                    negative = gr.Textbox(show_label=False,
+                                          value=CONFIG.get("default_negative_prompt", "") or "",
                                           elem_id="cz_neg", lines=1, max_lines=6, container=False, scale=4,
-                                          placeholder="No negative prompt on Ideogram 4: its unconditional branch takes no text (asymmetric CFG)")
+                                          placeholder="Negative prompt (optional). MOSS-Image's own suggestion: "
+                                                      + cz_moss.NEGATIVE_PRESET)
                     stop_btn = gr.Button("Stop", variant="stop", scale=1, min_width=150)
 
                 with gr.Row():
@@ -4802,7 +4810,7 @@ def build_ui():
                                  "missing bands are outpainted (nothing is lost). "
                                  "Off = keep the input's native ratio.")
                         with gr.Row():
-                            # 256 to 2048 a side: Ideogram 4's range (cz_ideogram.fit_size).
+                            # 256 to 2048 a side: MOSS-Image's range (cz_moss.fit_size).
                             width = gr.Slider(256, 2048, value=int(CONFIG.get("default_width", 1024)),
                                               step=16, label="Width")
                             height = gr.Slider(256, 2048, value=int(CONFIG.get("default_height", 1024)),
@@ -4968,11 +4976,12 @@ def build_ui():
                                              "with a real CFG and a working negative prompt, "
                                              "three times slower.")
                                     precision_rb = gr.Radio(
-                                        list(cz_ideogram.PRECISIONS), value=cz_pipeline.PRECISION,
-                                        label="Precision", scale=2,
-                                        visible=len(cz_ideogram.PRECISIONS) > 1,
-                                        info="The official transformers' build. Ideogram 4 is "
-                                             "published in nf4 only (2026-10-31).")
+                                        list(cz_moss.PRECISIONS), value=cz_pipeline.PRECISION,
+                                        label="Text encoder precision", scale=2,
+                                        visible=len(cz_moss.PRECISIONS) > 1,
+                                        info="The Qwen3.5-9B text encoder: bf16 (16.8 GB) or "
+                                             "nf4 through bitsandbytes (~5.6 GB, not measured "
+                                             "yet). The DiT is always bf16.")
                                 precision_status = gr.Markdown("")
                                 _choices0 = _ckpt_choices()
                                 _vals0 = [v for _lab, v in _choices0]
@@ -5080,7 +5089,7 @@ def build_ui():
                                     civ_lora_q = gr.Textbox(
                                         show_label=False, scale=3, container=False,
                                         placeholder="LoRA name to search on CivitAI")
-                                    civ_lora_konly = gr.Checkbox(value=True, label="Ideogram only",
+                                    civ_lora_konly = gr.Checkbox(value=True, label="MOSS only",
                                                                  scale=1)
                                     civ_lora_search_btn = gr.Button("Search", size="sm",
                                                                     variant="primary", scale=1,

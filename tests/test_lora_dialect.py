@@ -177,15 +177,16 @@ def test_a_real_peft_lora_still_passes():
 # ---------------------------------------------------------------------------
 
 def _lora_file(name, dtype, scaled=True):
-    """A fake Ideogram 4 LoRA (4608 wide) in the dtype asked for; `scaled` adds the
-    factors."""
+    """A fake LoRA of an UNKNOWN family (block names no guard recognises: a family the
+    guard refuses by name, MOSS included until lot 4, would never reach the dtype
+    check tested here), in the dtype asked for; `scaled` adds the factors."""
     sd = {}
     for i in range(4):
-        b = f"transformer.layers.{i}.attention.to_q"
-        sd[b + ".lora_A.weight"] = torch.zeros(8, 4608, dtype=dtype)
-        sd[b + ".lora_B.weight"] = torch.zeros(4608, 8, dtype=dtype)
+        b = f"transformer.other_arch.{i}.attn.q"
+        sd[b + ".lora_A.weight"] = torch.zeros(8, 3072, dtype=dtype)
+        sd[b + ".lora_B.weight"] = torch.zeros(3072, 8, dtype=dtype)
         if scaled:
-            sd[b + ".lora_B.weight_scale"] = torch.ones(4608, 1)
+            sd[b + ".lora_B.weight_scale"] = torch.ones(3072, 1)
     p = os.path.join(TMP, name)
     save_file(sd, p)
     return p

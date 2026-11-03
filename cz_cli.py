@@ -1,4 +1,4 @@
-"""crispz-ideogram - the CLI (batch / scripting mode) + a persistent HTTP server (FastAPI).
+"""crispz-moss - the CLI (batch / scripting mode) + a persistent HTTP server (FastAPI).
 
 Pulled out of app.py (step 8). It imports the UI and the orchestration from cz_ui (which
 wires all the cz_* together); it redefines nothing of the pipeline. app.py merely calls
@@ -316,7 +316,7 @@ def cli_main(argv=None):
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="crispz-ideogram CLI (txt2img + upscale). No args: launches the Gradio UI.",
+        description="crispz-moss CLI (txt2img + upscale). No args: launches the Gradio UI.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--cli", action="store_true", help="Force CLI mode (otherwise: launches the UI)")
@@ -474,18 +474,17 @@ def cli_main(argv=None):
     parser.add_argument("--esrgan-dir", help="Override ESRGAN_DIR for this run")
     # --flux3-* / --klein-* / --zimage-* are the family's older names: kept as aliases so
     # as to break no existing script.
-    parser.add_argument("--ideogram-model", "--flux3-model", "--klein-model", "--zimage-model",
-                        dest="zimage_model",
-                        help="Override the model: an Ideogram 4 HF repo or diffusers folder "
-                             "(default ideogram-ai/ideogram-4-nf4-diffusers, gated, "
-                             "NON-COMMERCIAL licence).")
-    parser.add_argument("--ideogram-transformer", "--flux3-transformer", "--klein-transformer",
-                        "--zimage-transformer", dest="zimage_transformer",
-                        help="Transformer override from a diffusers repo or folder. Single-file "
-                             "Ideogram 4 transformers are refused with the reason (no "
-                             "converter in diffusers).")
+    parser.add_argument("--moss-model", "--ideogram-model", "--flux3-model", "--klein-model",
+                        "--zimage-model", dest="zimage_model",
+                        help="Override the model: a MOSS-Image HF repo or diffusers folder "
+                             "(default OpenMOSS-Team/MOSS-Image-SFT, Apache 2.0, public).")
+    parser.add_argument("--moss-transformer", "--ideogram-transformer", "--flux3-transformer",
+                        "--klein-transformer", "--zimage-transformer", dest="zimage_transformer",
+                        help="DiT override: a single .safetensors in the ComfyUI / CivitAI "
+                             "layout (bf16 or int8 ConvRot; the 4-bit builds are refused with "
+                             "the reason). The VAE and the text encoder come from the repo.")
     parser.add_argument("--save-paths", action="store_true",
-                        help="Save --esrgan-dir and --ideogram-model to preferences.json")
+                        help="Save --esrgan-dir and --moss-model to preferences.json")
     # Reports
     parser.add_argument("--list-models", action="store_true", help="List ESRGAN models then exit")
     parser.add_argument("--time-log", default=None,

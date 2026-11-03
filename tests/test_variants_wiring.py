@@ -224,11 +224,11 @@ def test_protocol_plain_prompt_is_unchanged():
     with _wildcards({}):
         res, fake = _run_protocol_gen({"prompt": "a cat <lora:ink:0.5>",
                                        "negative": "blurry", "seed": 42})
-    # klein: negative cleared at validation (distilled model, SUPPORTS_NEGATIVE=False)
-    assert fake.calls["gen"] == ("a cat", 42, "")
+    # crispz-moss: a real negative prompt (SUPPORTS_NEGATIVE=True), passed as is
+    assert fake.calls["gen"] == ("a cat", 42, "blurry")
     assert fake.calls["loras"] == [("ink", 0.5)]
     assert res["seed_used"] == 42
-    assert any("'negative' ignored" in w for w in res["warnings"]), res["warnings"]
+    assert not any("'negative' ignored" in w for w in res["warnings"]), res["warnings"]
 
 
 def test_protocol_validate_keeps_lora_tags_inside_groups_until_run_time():
@@ -244,7 +244,8 @@ def test_protocol_expands_and_reads_only_the_picked_lora():
             "prompt": "a {cat <lora:catlora:0.8>|dog <lora:doglora>}, park",
             "negative": "{blurry|noisy}", "seed": 7})
     prompt, seed, negative = fake.calls["gen"]
-    assert (prompt, seed, negative) == ("a cat, park", 7, "")
+    # the negative's variant group is expanded too (in order + index 0 -> "blurry")
+    assert (prompt, seed, negative) == ("a cat, park", 7, "blurry")
     assert fake.calls["loras"] == [("catlora", 0.8)]
     assert res["loras"] == ["catlora:0.8"]
 

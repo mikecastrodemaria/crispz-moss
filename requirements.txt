@@ -62,10 +62,9 @@ uvicorn
 # fails with "DLL load failed while importing _C" when loading the VAE. The simplest
 # solution: pip uninstall xformers. Torch 2.7+ has a native SDPA, which is enough.
 
-# crispz-ideogram: the official Ideogram 4 weights are published in nf4
-# (ideogram-ai/ideogram-4-nf4-diffusers), a 4-bit format diffusers loads through
-# bitsandbytes. Official Windows wheels exist since 0.43. To confirm on the 5090 at the
-# first load (lot 1): if the repo's config names another quantizer, this line changes.
+# crispz-moss: OPTIONAL, only for `moss_precision: nf4` (the Qwen3.5-9B text encoder
+# quantized to 4 bits at load time, ~5.6 GB instead of 16.8; not measured on the 5090
+# yet). The default bf16 path needs nothing. Official Windows wheels exist since 0.43.
 bitsandbytes>=0.45
 
 # crispz-ideogram lot 2: the local magic prompt constrains Qwen3-VL-8B's output to the

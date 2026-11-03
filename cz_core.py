@@ -1,4 +1,4 @@
-"""crispz-ideogram - core foundation (config, paths, logging, device).
+"""crispz-moss - core foundation (config, paths, logging, device).
 
 Pulled out of app.py. No dependency on the rest of the project (app.py and the other
 modules import cz_core, never the other way round). It holds:
@@ -33,7 +33,7 @@ import torch
 from PIL import Image
 
 # The application's version (shown in the title; one CHANGELOG.md entry per version).
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.0-dev"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PREFS_PATH = os.path.join(HERE, "preferences.json")
@@ -44,7 +44,7 @@ CONFIG_SAMPLE_PATH = os.path.join(HERE, "config-sample.txt")
 DEFAULT_MODEL = "4x-ClearRealityV1_Soft.safetensors"
 DEFAULT_FACTOR = 2.0
 DEFAULT_DENOISE = 0.30
-DEFAULT_STEPS = 12          # measured on Ideogram 4 (lot 7): 36 looks the same, 53 % slower
+DEFAULT_STEPS = 12          # measured on Ideogram 4 (lot 7): 36 looks the same, 53 % slower; to re-measure on MOSS (lot 3)
 DEFAULT_TILE = 760
 DEFAULT_OVERLAP = 32
 # Tiling of the diffusion pass (4K+). 0 = the whole image (the default).
@@ -111,17 +111,18 @@ DEFAULT_OUTPUT_FORMAT = CONFIG.get("default_output_format", DEFAULT_OUTPUT_FORMA
 # card) BEFORE 'flux-3-image-klein' (the flow map: 16 steps, no CFG, guidance left at 1.0
 # so the UI does not display a value suggesting an active CFG). 'flux-3' / 'flux3' catch
 # the mirrors and community files (unsloth/flux-3-image-klein-GGUF, flux3-xxx.safetensors).
-# crispz-ideogram: 'ideogram' first (48 steps, guidance schedule peaking at 7.0, the
-# official settings of Ideogram4Pipeline). The FLUX.3 entries stay for the family files
-# a shared models folder may hold; they never apply to the Ideogram base repo.
+# crispz-moss: 'moss' first (50 steps, CFG 3.0, the official MOSS-Image settings; the
+# Base and SFT checkpoints share them). 'ideogram' and the FLUX.3 entries stay for the
+# family files a shared models folder may hold; they never apply to the MOSS base repo.
 MODEL_PROFILES = CONFIG.get("model_profiles") or {
+    "moss": {"steps": 50, "guidance": 3.0},
     "ideogram": {"steps": 48, "guidance": 7.0},
     "flux-3-image-klein-base": {"steps": 50, "guidance": 3.5},
     "flux-3-image-klein": {"steps": 16, "guidance": 1.0},
     "flux-3": {"steps": 16, "guidance": 1.0},
     "flux3": {"steps": 16, "guidance": 1.0},
 }
-DEFAULT_MODEL_PROFILE = CONFIG.get("default_model_profile") or {"steps": 48, "guidance": 7.0}
+DEFAULT_MODEL_PROFILE = CONFIG.get("default_model_profile") or {"steps": 50, "guidance": 3.0}
 
 # crispz-klein's profile keys, as every config.txt copied from its config-sample.txt
 # carries them. 'klein' is a substring of 'flux-3-image-klein': through such a config the
@@ -151,9 +152,9 @@ def profile_for_model(name):
                      f"skipped for FLUX.3 models. Copy the model_profiles block of "
                      f"config-sample.txt to silence this.")
             continue
-        return int(prof.get("steps", DEFAULT_MODEL_PROFILE.get("steps", 48))), \
-            float(prof.get("guidance", DEFAULT_MODEL_PROFILE.get("guidance", 7.0)))
-    return int(DEFAULT_MODEL_PROFILE.get("steps", 48)), float(DEFAULT_MODEL_PROFILE.get("guidance", 7.0))
+        return int(prof.get("steps", DEFAULT_MODEL_PROFILE.get("steps", 50))), \
+            float(prof.get("guidance", DEFAULT_MODEL_PROFILE.get("guidance", 3.0)))
+    return int(DEFAULT_MODEL_PROFILE.get("steps", 50)), float(DEFAULT_MODEL_PROFILE.get("guidance", 3.0))
 
 
 # The Ollama instruction strings (editable in config.txt). The examples from before 1.36
@@ -431,7 +432,7 @@ def download_with_progress(url, dst, label=None, block=65536, timeout=30):
     label = label or os.path.basename(dst)
     tmp = dst + ".tmp"
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": "crispz-ideogram"})
+    req = urllib.request.Request(url, headers={"User-Agent": "crispz-moss"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r, open(tmp, "wb") as f:
             total = int(r.headers.get("Content-Length") or 0)

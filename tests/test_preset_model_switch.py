@@ -43,6 +43,9 @@ def _ckpt(name, family="flux3"):
     if family == "ideogram":
         sd = {"llm_cond_proj.weight": torch.zeros(2, 2),
               "embed_image_indicator.weight": torch.zeros(2, 2)}
+    elif family == "moss":
+        sd = {"video_embedder.weight": torch.zeros(2, 2, dtype=torch.bfloat16),
+              "layers.0.proj.qkv.weight": torch.zeros(6, 2, dtype=torch.bfloat16)}
     elif family == "flux3":
         sd = {"early_stream_modulations.0.lin.weight": torch.zeros(2, 2),
               "mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2)}
@@ -80,10 +83,12 @@ def test_refusal_names_the_reason_and_the_studio_that_runs_the_file():
     _ckpt("ideo.safetensors", family="ideogram")
     _ckpt("flux3.safetensors", family="flux3")
     _ckpt("klein2.safetensors", family="flux2")
+    _ckpt("moss.safetensors", family="moss")
 
     def check(_saved):
+        assert P.checkpoint_refusal("moss.safetensors") is None
         why = P.checkpoint_refusal("ideo.safetensors")
-        assert why and "single-file Ideogram 4" in why, why
+        assert why and "Ideogram 4" in why and "crispz-ideogram" in why, why
         why = P.checkpoint_refusal("flux3.safetensors")
         assert why and "FLUX.3" in why and "crispz-flux3" in why, why
         why = P.checkpoint_refusal("klein2.safetensors")
@@ -107,7 +112,7 @@ def test_apply_checkpoint_refuses_a_single_file():
 
     def check(_saved):
         for name, needle in (("flux3.safetensors", "crispz-flux3"),
-                             ("ideo.safetensors", "single-file Ideogram 4")):
+                             ("ideo.safetensors", "crispz-ideogram")):
             msg = U._apply_checkpoint(name)[0]
             assert not P.ZIMAGE_TRANSFORMER, f"{name} was applied"
             assert P.BASE_REPO == U.FLUX3_DISTILLED
@@ -169,7 +174,7 @@ def test_a_preset_switches_its_own_base_repo():
     repo."""
     def check(saved):
         _preset("zz-base", "", base=U.FLUX3_BASE)
-        P.BASE_REPO = "someone/ideogram-4-mirror"
+        P.BASE_REPO = "someone/moss-image-mirror"
 
         outs = U._ui_preset_load("zz-base")
         status = outs[-1]
@@ -177,7 +182,7 @@ def test_a_preset_switches_its_own_base_repo():
         assert "NOT switched" not in status, status
         assert "Base model switched" in status, status
         assert "next **Generate**" in status and "released" in status, status
-        assert "NON-COMMERCIAL" in status, "the base repo's note must follow the swap"
+        assert "Apache 2.0" in status, "the base repo's note must follow the swap"
         assert saved.get(P.CFG_MODEL_KEY) == U.FLUX3_BASE, saved
     _with_lib(check)
 
@@ -221,15 +226,15 @@ def test_saving_records_the_base_repo():
 
 
 def test_the_base_repo_is_announced_before_the_run():
-    """One Ideogram 4 checkpoint (the official nf4 repo): it is offered, it is the
-    default, and it says what it costs BEFORE the run: the NON-COMMERCIAL licence, the
-    gated repo, the steps."""
+    """Two MOSS-Image checkpoints (SFT, the default, and Base): both offered, and each
+    says what it costs BEFORE the run: the Apache 2.0 licence, the size, the steps."""
     repo = U.FLUX3_DISTILLED
-    assert repo == U.FLUX3_BASE == P.DEFAULT_BASE_REPO
-    assert repo in U.ZIMAGE_BASE_REPOS
-    note = U.BASE_REPO_NOTES[repo]
-    assert "NON-COMMERCIAL" in note and "gated" in note and "48 steps" in note, note
-    assert repo in note
+    assert repo == P.DEFAULT_BASE_REPO and U.FLUX3_BASE != repo
+    assert repo in U.ZIMAGE_BASE_REPOS and U.FLUX3_BASE in U.ZIMAGE_BASE_REPOS
+    for r in (repo, U.FLUX3_BASE):
+        note = U.BASE_REPO_NOTES[r]
+        assert "Apache 2.0" in note and "50 steps" in note and "27 GB" in note, note
+        assert r in note and "NON-COMMERCIAL" not in note
 
 
 def test_choosing_a_base_repo_retries_its_dimension():
@@ -241,8 +246,8 @@ def test_choosing_a_base_repo_retries_its_dimension():
         P.set_zimage_model(U.FLUX3_BASE)
         assert U.FLUX3_BASE not in P._BASE_DIM_CACHE, \
             "the cached failure must be purged when the repo is chosen again"
-        # and an Ideogram repo never needs the Hub for its width anyway: 4608
-        assert P._base_hidden_dim(U.FLUX3_BASE) == 4608
+        # and a MOSS repo never needs the Hub for its width anyway: 3072
+        assert P._base_hidden_dim(U.FLUX3_BASE) == 3072
         P._BASE_DIM_CACHE.pop(U.FLUX3_BASE, None)
     _with_lib(check)
 

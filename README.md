@@ -1,4 +1,12 @@
-# crispz-ideogram
+# crispz-moss
+
+> **Work in progress (lot 1 of 6, 2026-11-03).** crispz-moss is crispz-ideogram ported to
+> **MOSS-Image** (OpenMOSS, Apache 2.0: commercial use allowed). The engine, the single-file
+> loaders (ComfyUI / CivitAI) and the tests are in; the GPU measurements, the layout JSON
+> editor and the rest of this README follow lot by lot. The specification is `CLAUDE.md`;
+> below this banner the README still describes crispz-ideogram.
+
+# crispz-ideogram (the base this fork starts from)
 
 The **Ideogram 4.0** studio of the crispz family: text in images and design (posters,
 logos, packaging, slides, covers, dense typography), Fooocus-style, **100% local**.

@@ -80,18 +80,29 @@ def _ckpt_ideogram(name):
     return p
 
 
+def _ckpt_moss(name):
+    """A fake MOSS-Image transformer (the strong marker is video_embedder; ComfyUI's
+    fused qkv is one more)."""
+    p = os.path.join(TMP, name)
+    save_file({"video_embedder.weight": torch.zeros(2, 2),
+               "layers.0.proj.qkv.weight": torch.zeros(6, 2)}, p)
+    return p
+
+
 def test_foreign_files_are_refused_and_an_ideogram_one_passes_whatever_the_base():
     """The FAMILY decides, from the tensor names, and it does not depend on which base
-    repo is loaded: FLUX.2 Klein goes to crispz-klein, FLUX.3 to crispz-flux3, an
-    Ideogram 4 file is not refused by this guard."""
+    repo is loaded: FLUX.2 Klein goes to crispz-klein, FLUX.3 to crispz-flux3, Ideogram 4
+    to crispz-ideogram; a MOSS-Image file is not refused by this guard."""
     p2 = _ckpt("m4.safetensors", 3072)
     p3 = _ckpt3("m3.safetensors")
     pi = _ckpt_ideogram("mi.safetensors")
-    for base, dim in (("ideogram-base", None), ("mystere", None)):
-        assert _with_base(base, dim, lambda: P._safetensors_unsupported(pi)) is None
-        for p, fam, home in ((p2, "FLUX.2", "crispz-klein"), (p3, "FLUX.3", "crispz-flux3")):
+    pm = _ckpt_moss("mm.safetensors")
+    for base, dim in (("moss-base", None), ("mystere", None)):
+        assert _with_base(base, dim, lambda: P._safetensors_unsupported(pm)) is None
+        for p, fam, home in ((p2, "FLUX.2", "crispz-klein"), (p3, "FLUX.3", "crispz-flux3"),
+                             (pi, "Ideogram 4", "crispz-ideogram")):
             msg = _with_base(base, dim, lambda: P._safetensors_unsupported(p))
-            assert msg and fam in msg and home in msg and "Ideogram 4" in msg, msg
+            assert msg and fam in msg and home in msg and "MOSS-Image" in msg, msg
             # the per-file reason stays SHORT: it is repeated once per discarded file.
             assert len(msg) < 130, f"reason too long ({len(msg)} chars): {msg}"
             assert "NON-COMMERCIAL" not in msg
@@ -101,9 +112,9 @@ def test_foreign_files_are_refused_and_an_ideogram_one_passes_whatever_the_base(
 def test_summary_names_the_studio_that_runs_the_file_once():
     """The summary of the discarded files says where they DO run, once, and never
     pretends a setting of this build could load them."""
-    line = _with_base("ideogram-base", None, lambda: P._variant_skip_summary(11, 4096))
+    line = _with_base("moss-base", None, lambda: P._variant_skip_summary(11, 4096))
     assert "11 checkpoint" in line, line
-    assert "FLUX.2-klein-9B" in line and "Ideogram 4" in line, line
+    assert "FLUX.2-klein-9B" in line and "MOSS-Image" in line, line
     assert "crispz-klein" in line, line
     assert "zimage_model" not in line, "the old name must no longer appear"
     assert "NON-COMMERCIAL" not in line and "switch the base" not in line, line
@@ -192,10 +203,11 @@ def test_a_lora_declares_its_variant_through_its_shapes():
 
 def test_a_foreign_lora_is_refused_in_one_sentence():
     """peft would otherwise dump forty lines of key mismatches, or match nothing in
-    silence. A FLUX.2 or FLUX.3 LoRA is refused naming its studio; an Ideogram 4 LoRA
-    (layers.N.attention, 4608 wide) goes through."""
+    silence. A FLUX.2, FLUX.3 or Ideogram 4 LoRA is refused naming its studio; a MOSS
+    LoRA (layers.N.proj.q, 3072 wide) is refused by name too, until lot 4 brings the
+    loader (listed, never applied in silence)."""
     why = P._lora_unsupported(_lora("lora_flux2.safetensors", 3072, layout="flux-original"))
-    assert why and "FLUX.2" in why and "Ideogram 4" in why and "crispz-klein" in why, why
+    assert why and "FLUX.2" in why and "MOSS-Image" in why and "crispz-klein" in why, why
     assert "\n" not in why.strip(), "one sentence"
     p = os.path.join(TMP, "lora_flux3.safetensors")
     save_file({"transformer.mode_blocks.0.attn.to_q.lora_A.weight": torch.zeros(8, 3072),
@@ -205,7 +217,13 @@ def test_a_foreign_lora_is_refused_in_one_sentence():
     p = os.path.join(TMP, "lora_ideogram.safetensors")
     save_file({"transformer.layers.0.attention.to_q.lora_A.weight": torch.zeros(8, 4608),
                "transformer.layers.0.attention.to_q.lora_B.weight": torch.zeros(4608, 8)}, p)
-    assert P._lora_unsupported(p) is None
+    why = P._lora_unsupported(p)
+    assert why and "Ideogram" in why and "crispz-ideogram" in why, why
+    p = os.path.join(TMP, "lora_moss.safetensors")
+    save_file({"layers.0.proj.q.lora_A.weight": torch.zeros(8, 3072),
+               "layers.0.proj.q.lora_B.weight": torch.zeros(3072, 8)}, p)
+    why = P._lora_unsupported(p)
+    assert why and "lot 4" in why, why
     print("OK test_a_foreign_lora_is_refused_in_one_sentence")
 
 

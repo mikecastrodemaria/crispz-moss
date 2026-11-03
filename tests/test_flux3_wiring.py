@@ -211,7 +211,7 @@ def test_a_flux3_gguf_is_read_by_family_and_refused_before_any_load(engine, monk
     w.close()
     assert P._file_family(path) == "flux3"
     why = P.checkpoint_refusal(path)
-    assert why and "crispz-flux3" in why and "Ideogram 4" in why, why
+    assert why and "crispz-flux3" in why and "MOSS-Image" in why, why
     assert P.model_info(path)["variant"] == "FLUX.3"
     calls = []
     monkeypatch.setattr(cz_flux3, "load_transformer",

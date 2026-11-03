@@ -82,6 +82,30 @@ Qwen3.5 (couches GDN hybrides, noyaux `flash-linear-attention` absents sous Wind
 repli torch, vitesse d'encodage à mesurer) ; RAM nécessaire à l'offload « encodeur
 seul » (16,8 Go en RAM) ; vitesse réelle en bf16 sans quantification du DiT.
 
+**Fichiers uniques Hugging Face et CivitAI (demande de Mike, 03/11/2026)** : la
+compatibilité avec les poids publiés hors du repo diffusers fait partie du lot 1.
+Relevé (en-têtes safetensors lus le 03/11/2026) :
+- `Comfy-Org/MOSS-Image` (HF) et la page CivitAI « MOSS Image » (miroir officiel, 3005406)
+  publient le MÊME format ComfyUI : DiT bf16 (9,93 Go, 379 tenseurs) ou
+  `int8_tensorwise` + ConvRot (5,29 Go : poids int8, `weight_scale` par ligne, blobs
+  `comfy_quant` et `comfy_attention.config`) ; encodeur `qwen3.5_9b` en bf16 (19,3 Go,
+  clés `model.language_model.*`, `model.visual.*`, `lm_head`, tête `mtp`), int8 ConvRot
+  (9,75 Go) ou `asym_w4a8_int8` GPTQ (7,34 Go, codebook 16 valeurs) ; VAE `flux2-vae`.
+- La seule différence de clés avec le repo diffusers : ComfyUI fusionne les projections
+  d'attention du DiT en `layers.N.proj.qkv` [9216, 3072] (q, k, v dans cet ordre) ; les
+  blocs texte ont déjà `qkv` fusionné en amont. `rope.bands` est dans les deux.
+- « Dirty-Moss » (CivitAI 3015644, fusion de LoRAs NSFW par Sateluco) : DiT seul, même
+  format (bf16 9,93 Go ou int8 5,29 Go). Se charge comme fichier unique de DiT.
+- ConvRot = rotation de Hadamard par groupes de 256 (64 sur la tour vision), matrice
+  « regular hadamard » de comfy-kitchen (base H4, produits de Kronecker, PAS Sylvester),
+  déjà écrite dans `cz_pipeline._hadamard_ortho` pour FLUX.3 ; `cz_moss` la reprend.
+- Décision : le DiT bf16 et int8 ConvRot et l'encodeur bf16 et int8 ConvRot sont lus
+  (déquantifiés en bf16 en RAM, `qkv` scindé, préfixe `model.` retiré, `lm_head` et `mtp`
+  jetés) ; les formats 4 bits (`asym_w4a8_int8`, `convrot_w4a4`, nvfp4) et 6 bits sont
+  refusés PAR LEUR NOM dans le menu, avec l'alternative (le fichier bf16 ou int8 de la
+  même page). Les LoRAs CivitAI (`lora_A`/`lora_B` sans `.weight`, métadonnées
+  `moss-edit-lora` ou `hayate_lora_format`) : lot 4.
+
 ## 3. Base : crispz-ideogram, pas crispz-flux3
 
 | Candidat | Pour | Contre |
@@ -115,7 +139,7 @@ protocole v1, les tests. Ce qu'on remplace : le moteur (`cz_ideogram.py` devient
 
 ## 5. Lots
 
-### Lot 1 : moteur local (cz_moss.py) et A/B texte contre Ideogram
+### Lot 1 : moteur local (cz_moss.py), fichiers uniques, et A/B texte contre Ideogram
 
 1. `MossPipe` autour d'une sous-classe du `MOSSImagePipeline` vendorisé (même convention
    d'appel que `IdeogramPipe`). La sous-classe ajoute : `callback_on_step_end` (tenseur
@@ -147,6 +171,12 @@ protocole v1, les tests. Ce qu'on remplace : le moteur (`cz_ideogram.py` devient
    nommant leur studio. LoRAs : lot 4 (pas de mixin dans le pipeline).
 6. `cz_protocol` : `negative` True, `img2img` / `inpaint` False jusqu'au lot 3, `edit`
    et `refs` False, `cloud` absent.
+6b. **Fichiers uniques (ComfyUI / CivitAI)** : `moss_transformer` (ou le menu Checkpoints)
+   accepte un DiT bf16 ou int8 ConvRot ; `text_encoder` accepte un encodeur Qwen3.5 en
+   bf16 ou int8 ConvRot, ou un repo / dossier transformers (finetune « abliterated »...).
+   Refus nommés pour les 4 bits, les LoRAs posés dans le mauvais dossier et les autres
+   familles. Tests CPU sur des fichiers ComfyUI miniatures écrits par les tests eux-mêmes
+   (fusion qkv, blobs, quantification int8 ConvRot réelle) relus à l'identique.
 7. **`tools/gpu_lot1_check.py`** sur la 5090, carte libre, pour chaque offload utile :
    chargement, VRAM au repos et en pic, 1024x1024, 1456x1456 (2 Mpx), 2048x1152, 50 steps,
    Stop, aperçu live, encodeur bf16 contre nf4 (temps d'encodage et écart). Puis l'**A/B
@@ -284,8 +314,78 @@ vérifiées avant tout usage client.
   `FORK-ideogram-CLAUDE.md` (pièges d'environnement, mesures, décisions : à lire avant
   tout test GPU), avec `FORK-flux3-CLAUDE.md` en dessous.
 - Remotes : `origin` = crispz-moss, `ideogram` = crispz-ideogram.
-- Rien n'est encore renommé : l'app démarre toujours comme crispz-ideogram. Lot 1 à venir
-  sur une branche `wip/moss-engine`, après validation de ce cahier par Mike.
+- Cahier validé par Mike le 03/11/2026, avec l'ajout de la compatibilité Hugging Face et
+  CivitAI (§2, fichiers uniques).
+
+### Lot 1 (03/11/2026) : moteur livré sur `wip/moss-engine`, mesure GPU à faire
+
+- `third_party/moss_image/` : `pipeline_moss_image.py` d'OpenMOSS vendorisé tel quel
+  (Apache 2.0, LICENSE, README avec commit et SHA-256), jamais de `trust_remote_code`.
+- `cz_moss.py` : `MossPipeline` (sous-classe, la boucle amont ligne pour ligne plus
+  `callback_on_step_end`, `_interrupt`, `sigmas` ; test : même image au pixel près que la
+  classe amont), `MossPipe` (convention d'appel de crispz, négatif réel avec cache du
+  dernier négatif, `encode_prompt` pour le cache d'embeddings, offload « encodeur seul »
+  repris d'Ideogram, refus nommés img2img / inpaint (lot 3), édition (crispz-flux3) et
+  LoRA (lot 4), couches `uncond_skip` ramenées à celles du modèle), détection de famille
+  (`video_embedder`, `.proj.q.` ... ; Ideogram et FLUX nommés via cz_ideogram), `load`
+  composant par composant (DiT et scheduler vendorisés, `Qwen3_5Model`, VAE fp32),
+  lecteurs de fichiers uniques ComfyUI / CivitAI (DiT bf16 / int8 ConvRot, encodeur
+  bf16 / int8 ConvRot via `from_pretrained(None, state_dict=...)`, refus 4 bits par nom).
+- `cz_pipeline` : `engine = cz_moss`, clés `moss_model`, `moss_transformer`,
+  `moss_precision` (= précision de l'ENCODEUR, bf16 ou nf4 ; le DiT reste bf16), env
+  `MOSS_*`, guidance 3,0, négatif passé, aperçu live sur les latents (B, 128, h, w) avec
+  la matrice FLUX.2 telle quelle (ordre FLUX, test), VRAM estimée 25,4 Go (bf16) ou
+  15,4 (nf4), 'auto' -> 'model' encodeur seul sous 40 Go, encodeur de remplacement
+  (`text_encoder`) appliqué, fichiers uniques listés et chargés, LoRA MOSS refusée avec
+  « lot 4 », Ideogram / FLUX refusés en nommant leur studio.
+- `cz_protocol` : `crispz-moss`, `negative` True, img2img / inpaint False, cloud toujours
+  off. `cz_core` : profil `moss` 50 / 3,0. `config-sample.txt`, `cz_ui`, `cz_cli`,
+  `preferences.example.json` : champ négatif rétabli, presets « MOSS (50 steps) » et
+  « Draft (25 steps) », notes de licence Apache 2.0 par repo (SFT, Base), sélecteur de
+  précision de l'encodeur visible, filtre CivitAI « MOSS Image », `--moss-model` /
+  `--moss-transformer` (anciens noms en alias).
+- Tests : `tests/moss_tiny.py` (MOSS miniature : DiT 2 blocs, Qwen3.5 4 couches hybride
+  avec les replis torch, VAE FLUX.2 miniature, vrai tokenizer), `test_moss_engine.py` (20),
+  `test_moss_wiring.py` (12) ; smoke 22/22.
+- **Tests hérités d'Ideogram, traités un par un** (aucun désactivé, aucun xfail) :
+  - réécrits pour MOSS, même intention : `test_civitai_search` (base « MOSS Image »,
+    case « MOSS only »), `test_detailer_steps` (profil 50), `test_encoder_trim` (budget
+    bf16 ~25 Go), `test_flux3_wiring`, `test_klein_variant` (fixture MOSS acceptée,
+    Ideogram refusé en nommant crispz-ideogram, LoRA MOSS refusée « lot 4 »),
+    `test_preset_model_switch` (deux repos, notes Apache 2.0, largeur 3072),
+    `test_quant_formats` (clé `video_embedder`, GGUF MOSS refusé par nom),
+    `test_model_profiles` (clés `moss_*`, 50 / 3,0, précision bf16 / nf4),
+    `test_protocol`, `test_variants_wiring` et `test_improve_wiring` (négatif réel),
+    `test_undistilled_guidance`, `test_ideogram_api` (le protocole ne signale jamais de
+    cloud) ;
+  - fixtures de LoRA d'une famille inconnue (jamais filtrée) pour les tests de mécanique
+    générique `test_lora_dialect`, `test_lora_offload` : une LoRA MOSS est refusée par
+    nom jusqu'au lot 4, elle n'atteindrait pas ce qui est testé ; `test_prescaled_fp8`
+    (marqueur `video_embedder`) ;
+  - **retiré** : `test_ideogram_wiring.py` (câblage de l'IdeogramPipe dans cz_pipeline,
+    remplacé par `test_moss_wiring.py` ; ses tests des chemins img2img / refine /
+    outpaint reviennent au lot 3 sur MossPipe). `test_ideogram_engine.py` et
+    `test_ideogram_emulated.py` restent (ils testent l'adaptateur Ideogram seul, encore
+    dans l'arbre) jusqu'au retrait de `cz_ideogram.py` (lot 2 ou 6).
+- Suite complète (`tools/run_tests.py`, un processus par fichier, ce que lance le CI) :
+  **69 fichiers sur 69 passent** (dont `test_ideogram_e2e` sauté sans CUDA) ; smoke 22/22 ;
+  `check_config_keys`, `check_lock`, `compileall` OK. En un seul processus (`pytest tests`),
+  deux tests tombent sur l'état global partagé entre fichiers (la raison d'être de
+  `run_tests.py`, déjà vraie avant le fork).
+- Vérifié dans Chromium : l'app démarre, champ négatif actif avec la suggestion MOSS,
+  bouton « Improve negative », titre `crispz-moss 0.1.0-dev`. Reste visible, pour le
+  lot 2 : l'accordéon « Ideogram caption (JSON) » (l'éditeur garde le schéma Ideogram
+  jusqu'au lot 2).
+- `tools/gpu_lot1_check.py` réécrit : chargement, 1024 à froid et à chaud, 1456x1456,
+  2048x1152, aperçu, Stop, `--nf4` (encodeur), puis l'**A/B texte** (3 designs du lot 2
+  d'Ideogram en texte libre et en layout JSON, 4 seeds, `bench/lot1/ab.md` à remplir à
+  l'œil, liens vers `../crispz-ideogram/bench/lot2`).
+- Sous Windows, transformers avertit « causal_conv1d / flash-linear-attention absents,
+  repli PyTorch » à chaque encodage : exact, plus lent, à chronométrer (`2_encode_prompt_s`
+  du rapport).
+- À faire chez Mike : `git pull`, `pip install` rien de nouveau (bitsandbytes seulement
+  pour `--nf4`), app crispz-ideogram FERMÉE, `tools\gpu_lot1_check.py` ; verdict sur
+  `bench/lot1/ab.md`.
 
 ## 10. Sources
 

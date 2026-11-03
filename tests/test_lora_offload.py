@@ -71,12 +71,13 @@ class FakePipe:
         pass
 
 
-def _lora(path, hidden=4608, rank=4):
-    """A tiny LoRA in the PEFT dialect, on Ideogram 4 block names, 4608 wide (the family
-    guard reads names AND width; a FLUX one would be refused upstream)."""
+def _lora(path, hidden=3072, rank=4):
+    """A tiny LoRA in the PEFT dialect on block names of an UNKNOWN family: the family
+    guard never filters those, so the adapter mechanics below run (a MOSS LoRA is
+    refused by name until lot 4 brings the loader, a FLUX or Ideogram one upstream)."""
     save_file({
-        "transformer.layers.0.attention.to_q.lora_A.weight": torch.zeros(rank, hidden),
-        "transformer.layers.0.attention.to_q.lora_B.weight": torch.zeros(hidden, rank),
+        "transformer.other_arch.0.attn.q.lora_A.weight": torch.zeros(rank, hidden),
+        "transformer.other_arch.0.attn.q.lora_B.weight": torch.zeros(hidden, rank),
     }, path)
     return path
 

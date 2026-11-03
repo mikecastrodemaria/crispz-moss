@@ -31,13 +31,13 @@ def _with_model(base, transformer, fn):
 
 
 def test_follows_the_model_profile_by_default():
-    """Ideogram 4's profile is 48 steps: a detailer pass never runs more than the model's
+    """MOSS-Image's profile is 50 steps: a detailer pass never runs more than the model's
     own budget, and never more than the slider."""
     repo = P.engine.DEFAULT_REPO
 
     def check():
         D.CONFIG.pop("detailer_steps", None)
-        assert D._detailer_steps(60) == 48, "Ideogram 4 runs 48 steps"
+        assert D._detailer_steps(60) == 50, "MOSS-Image runs 50 steps"
         assert D._detailer_steps(40) == 40
     _with_model(repo, None, check)
     print("OK test_follows_the_model_profile_by_default")
@@ -60,7 +60,7 @@ def test_config_overrides():
         D.CONFIG["detailer_steps"] = -1
         assert D._detailer_steps(12) == 12, "-1 hands control back to the slider"
         D.CONFIG["detailer_steps"] = "anything at all"
-        assert D._detailer_steps(60) == 48, "an unreadable value falls back on the profile (48)"
+        assert D._detailer_steps(60) == 50, "an unreadable value falls back on the profile (50)"
     _with_model(P.engine.DEFAULT_REPO, None, check)
     print("OK test_config_overrides")
 

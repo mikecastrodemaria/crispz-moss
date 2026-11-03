@@ -1,6 +1,6 @@
 {
   "esrgan_dir": "./upscale_models",
-  "ideogram_model": "ideogram-ai/ideogram-4-nf4-diffusers",
+  "moss_model": "OpenMOSS-Team/MOSS-Image-SFT",
   "model": "4x-ClearRealityV1_Soft.safetensors",
   "factor": 2.0,
   "denoise": 0.3,
