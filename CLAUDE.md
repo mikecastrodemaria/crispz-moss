@@ -456,6 +456,28 @@ Critères d'acceptation du lot 1 remplis : tests CPU sur MOSS miniature, une 2 M
 mesuré (pic à 27 Go sur un prompt nouveau), temps de chargement depuis le cache non noté
 (le premier passage incluait le téléchargement).
 
+### Deuxième passage sur la 5090 (03/11/2026) : cache chaud et encodeur nf4
+
+`--nf4 --skip-ab --skip-2mpx`, même machine, modèle déjà en cache :
+
+| | bf16 (encodeur en RAM, offload 'model') | nf4 (encodeur bitsandbytes, reste sur la carte) |
+|---|---|---|
+| Chargement depuis le cache | 28,5 s (26,2 s au rechargement) | 29,6 s |
+| VRAM au repos (torch) | 9,7 Go | 15,5 Go (DiT + VAE + encodeur nf4 ~5,8 Go) |
+| Encodage d'un prompt | 3,9 s (aller-retour PCIe compris) | **0,27 s** (aucun transfert) |
+| 1024x1024 à chaud | 42,7 s (0,854 s/step) | 41,5 s (0,83 s/step) |
+| Pic réservé, débruitage / décodage | 10,4 / 15,3 Go (27 Go au premier rendu, encodeur sur la carte) | 16,2 / 21,0 Go, **constant** (plus de pic à 27 Go) |
+| Écart de pixels contre le rendu bf16 (même seed) | | moyenne 29,6 sur 255, max 221 |
+
+Lecture : en nf4 l'encodeur reste résident (bitsandbytes ne déplace pas ses modules,
+`cz_moss._is_quantized`), ce qui supprime le pic à 27 Go et l'aller-retour de 16,8 Go
+à chaque nouveau prompt : plafond stable à 21 Go, encodage quasi gratuit. Le prix : des
+embeddings différents, donc une image nettement différente au même seed (écart moyen
+29,6 : une autre composition, pas un bruit). Décision en attente du jugement sur images
+(`bench/lot1/gen1024_nf4_encoder.png` contre `gen1024_warm.png` : textes exacts ?) ;
+tant qu'il n'est pas rendu, **bf16 reste le défaut**, nf4 est une option mesurée.
+Le décodage VAE en fp32 coûte environ 5 Go de pic à 1024 dans les deux modes.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
