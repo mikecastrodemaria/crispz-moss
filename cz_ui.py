@@ -192,7 +192,7 @@ _LIVE_PREVIEW_POLL = 0.25
 # config-sample.txt (performance_presets wins when the config defines it).
 PERFORMANCE = {
     "MOSS (50 steps)": (50, 3.0),
-    "Draft (25 steps)": (25, 3.0),
+    "Draft (12 steps)": (12, 3.0),
 }
 # Styles. Fooocus format: name -> {"prompt": a template with {prompt} (or None),
 # "negative_prompt": str}. The real library is loaded from styles/*.json (see _load_styles

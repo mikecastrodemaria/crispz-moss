@@ -7,9 +7,10 @@ what the emulation gives on the real weights, through the app's own functions:
                 they exist, else a fresh render of the Poster preset.
   1. IMG2IMG    the init at denoise 0.3 and 0.6 (P._refine_whole), same layout prompt.
   2. INPAINT    a box in the middle repainted with another subject (P.inpaint_run).
-  3. OUTPAINT   the init extended to the right (P.outpaint_directions), prompt = the
-                preset's summary caption (plain text: a layout would be rescaled).
-  4. REFRAME    the init reframed to 16:9 (P.reframe, contain), same caption.
+  3. OUTPAINT   the init extended to the right (P.outpaint_directions) with its layout
+                draft, PLACED on the source (lot 3b); --plain uses the preset's summary
+                caption instead (the first pass did: invented text in the new areas).
+  4. REFRAME    the init reframed to 16:9 (P.reframe, contain), same prompt.
   5. REFINE A/B denoise 0.3 at 12 then 36 steps, same seed (the lot 7 question of
                 crispz-ideogram, to re-measure on MOSS: 50 nominal steps).
   6. DRAFT      the Poster layout at 12, 20, 25 and 50 steps, same seed: which "Draft"
@@ -19,7 +20,7 @@ Each output is saved in bench/lot3/ with its time; report.md lists them. Look at
 the numbers say nothing about whether the text survived a 0.6 img2img.
 THE GPU MUST BE FREE (same check as tools/gpu_lot1_check.py).
 
-Usage:  .venv\\Scripts\\python tools\\gpu_lot3_check.py [--steps 50] [--skip-draft]
+Usage:  .venv\\Scripts\\python tools\\gpu_lot3_check.py [--steps 50] [--skip-draft] [--plain]
 """
 import json
 import os
@@ -111,9 +112,10 @@ def main():
     mask.save(os.path.join(OUT, "2_inpaint_mask.png"))
     _step("2_inpaint", lambda: P.inpaint_run(
         init, mask, "a large red retro bicycle, flat vector illustration", steps, 1.0, 7))
-    _step("3_outpaint_right", lambda: P.outpaint_directions(init, None, ["right"], caption,
+    fill_prompt = caption if "--plain" in sys.argv else prompt
+    _step("3_outpaint_right", lambda: P.outpaint_directions(init, None, ["right"], fill_prompt,
                                                             steps, 7))
-    _step("4_reframe_16x9", lambda: P.reframe(init, 16, 9, "contain", caption, steps, 7))
+    _step("4_reframe_16x9", lambda: P.reframe(init, 16, 9, "contain", fill_prompt, steps, 7))
     # 5. refine A/B: the same denoise at 12 and 36 steps (lot 7 of crispz-ideogram found
     # them identical to the eye on Ideogram 4; MOSS runs 50 nominal steps, to re-check)
     for n in (12, 36):

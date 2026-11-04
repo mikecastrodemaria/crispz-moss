@@ -221,3 +221,37 @@ def test_editor_form_round_trip_and_boxes():
     assert "#cz_bbox_bridge" in U.HEAD_JS
     w = U.warnings_md(["a", "b"])
     assert "2 warning(s)" in w and U.warnings_md([]).startswith("Layout: valid")
+
+
+def test_prepare_prompt_places_a_draft_on_the_source_image():
+    """Outpaint / reframe (lot 3b): a draft is PLACED in the rectangle where the source
+    image sits, its boxes scaled into it (never stretched over the new canvas), and the
+    summary says "no other text" for the rest; plain text gets the same guard."""
+    import cz_design
+    import cz_moss
+    draft = cz_design.prompt_of("Logo (square)")                   # drawn for 1024x1024
+    # the source (1024 square) pasted at (0, 0) of a 1536x1024 canvas (outpaint right)
+    text, w, h, note = cz_moss.prepare_prompt(draft, 1536, 1024, fit=True, place=(0, 0, 1024, 1024))
+    assert (w, h) == (1536, 1024) and "placed on the source image" in note
+    d = C.parse(text)
+    assert C.is_compiled(d)
+    lay, lw, lh = C.from_text(text, 1536, 1024)
+    assert (lw, lh) == (1536, 1024)
+    for it in lay["items"]:
+        x0, y0, x1, y1 = C.bbox_to_pixels(it["bbox"], 1536, 1024)
+        assert x1 <= 1024 + 2 and y1 <= 1024 + 2, (it["text"], x0, y0, x1, y1)   # inside the source
+    assert "no other text" in d["summary"]["caption"].lower()
+    # reframe contain: the source reduced to 768 square, centred in 1376x768
+    text, w, h, _ = cz_moss.prepare_prompt(draft, 1376, 768, fit=True, place=(304, 0, 1072, 768))
+    lay, _, _ = C.from_text(text, 1376, 768)
+    xs = [C.bbox_to_pixels(it["bbox"], 1376, 768) for it in lay["items"]]
+    assert all(304 - 2 <= b[0] and b[2] <= 1072 + 2 for b in xs), xs
+    # plain text: the guard is appended once
+    t, _, _, note = cz_moss.prepare_prompt("a bakery poster", 1376, 768, fit=True, place=(0, 0, 10, 10))
+    assert t == "a bakery poster. No other text." and "No other text" in note
+    t2, _, _, note2 = cz_moss.prepare_prompt(t, 1376, 768, fit=True, place=(0, 0, 10, 10))
+    assert t2 == t and note2 is None
+    # without place, fit still stretches (img2img of the whole image)
+    text, w, h, note = cz_moss.prepare_prompt(draft, 1536, 1024, fit=True)
+    assert "rescaled" in note and (w, h) == (1536, 1024)
+

@@ -643,8 +643,11 @@ def _qwen_call(pipe, **kw):
         if _emul and kw.get("image") is not None and not (kw.get("width") and kw.get("height")):
             _im = kw["image"][0] if isinstance(kw["image"], (list, tuple)) else kw["image"]
             kw["width"], kw["height"] = _im.size
+        # layout_box: outpaint / reframe say where the source image sits in the canvas
+        # (work pixels): a draft is PLACED there, not stretched (lot 3b).
         kw["prompt"], kw["width"], kw["height"], _note = engine.prepare_prompt(
-            kw["prompt"], kw.get("width"), kw.get("height"), fit=_emul)
+            kw["prompt"], kw.get("width"), kw.get("height"), fit=_emul,
+            place=kw.pop("layout_box", None))
         if _note and _note not in _LAYOUT_SAID:
             _LAYOUT_SAID.add(_note)
             _log(_note)
@@ -5062,7 +5065,8 @@ def reframe(image, ratio_w, ratio_h, fit, prompt, steps, seed, strength=1.0):
     t0 = time.time()
     out = _qwen_call(pipe, prompt=prompt or "", image=canvas, mask_image=mask,
                      strength=float(strength), num_inference_steps=int(steps),
-                     generator=_make_generator(seed), **_cfg(None)).images[0]
+                     generator=_make_generator(seed),
+                     layout_box=(ox, oy, ox + rw2, oy + rh2), **_cfg(None)).images[0]
     if out.size != (nw, nh):
         out = out.resize((nw, nh), Image.LANCZOS)
     _log(f"reframe done in {time.time() - t0:.1f}s")
@@ -5089,8 +5093,10 @@ def outpaint_directions(image, mask, directions, prompt, steps, seed, strength=1
     H, W = img.shape[:2]
     m = np.array(mask.convert("L")) if mask is not None else np.zeros((H, W), dtype=np.uint8)
     dirs = set(d.lower() for d in (directions or []))
+    pad_left = pad_top = 0                      # where the source lands in the canvas
     if "top" in dirs:
         p = int(H * expand)
+        pad_top = p
         img = np.pad(img, [[p, 0], [0, 0], [0, 0]], mode="edge")
         m = np.pad(m, [[p, 0], [0, 0]], mode="constant", constant_values=255)
     if "bottom" in dirs:
@@ -5099,6 +5105,7 @@ def outpaint_directions(image, mask, directions, prompt, steps, seed, strength=1
         m = np.pad(m, [[0, p], [0, 0]], mode="constant", constant_values=255)
     if "left" in dirs:
         p = int(W * expand)
+        pad_left = p
         img = np.pad(img, [[0, 0], [p, 0], [0, 0]], mode="edge")
         m = np.pad(m, [[0, 0], [p, 0]], mode="constant", constant_values=255)
     if "right" in dirs:
@@ -5123,6 +5130,8 @@ def outpaint_directions(image, mask, directions, prompt, steps, seed, strength=1
     # original image) keeps its full resolution, only the added edges are generated.
     work_img, work_mask, _ = _cap_work_res(canvas, mask_img)
     w2, h2 = work_img.size
+    sx, sy = w2 / float(full_size[0]), h2 / float(full_size[1])
+    layout_box = (pad_left * sx, pad_top * sy, (pad_left + W) * sx, (pad_top + H) * sy)
     pipe = get_pipe("inpaint")
     _log(f"outpaint {sorted(dirs)}: {image.size[0]}x{image.size[1]} -> "
          f"{full_size[0]}x{full_size[1]} (work {w2}x{h2}), {int(steps)} steps, "
@@ -5132,7 +5141,8 @@ def outpaint_directions(image, mask, directions, prompt, steps, seed, strength=1
     t0 = time.time()
     out = _qwen_call(pipe, prompt=prompt or "", image=work_img, mask_image=work_mask,
                      strength=float(strength), num_inference_steps=int(steps),
-                     generator=_make_generator(seed), **_cfg(None)).images[0]
+                     generator=_make_generator(seed), layout_box=layout_box,
+                     **_cfg(None)).images[0]
     out = _composite_back(out, canvas, mask_img, full_size,
                           feather=max(4, int(min(full_size) * 0.015)))
     _log(f"outpaint done in {time.time() - t0:.1f}s")

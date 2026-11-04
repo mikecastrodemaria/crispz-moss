@@ -422,14 +422,42 @@ def native_sigmas(steps, scheduler=None):
 
 
 # --- Layout prompts (lot 2) ------------------------------------------------------------
-def prepare_prompt(prompt, width=None, height=None, fit=False):
+def encode_swap_setting():
+    """config `moss_encode_swap` (default on), env MOSS_ENCODE_SWAP=0 to turn it off."""
+    env = os.environ.get("MOSS_ENCODE_SWAP")
+    if env is not None:
+        return env.strip().lower() not in ("0", "false", "no", "off")
+    try:
+        from cz_core import CONFIG
+        return bool(CONFIG.get("moss_encode_swap", True))
+    except Exception:
+        return True
+
+
+NO_OTHER_TEXT = "no other text"
+
+
+def _with_no_other_text(caption):
+    """The guard that keeps MOSS from inventing words elsewhere (the lot 1 and lot 3
+    finding): appended to a caption that does not say it."""
+    c = (caption or "").strip()
+    if NO_OTHER_TEXT in c.lower():
+        return c
+    return (c.rstrip(". ") + ". " if c else "") + "No other text."
+
+
+def prepare_prompt(prompt, width=None, height=None, fit=False, place=None):
     """What the model gets from a prompt string, and the size to render at:
     (prompt, width, height, note). A layout DRAFT (cz_caption: pixel boxes and its own
     canvas) is compiled to the model form and FORCES the size it was drawn for (a layout
     is worth one size); a COMPILED layout or plain text go through as they are. The note
     (or None) is what the caller logs.
     `fit=True` (img2img / inpaint: the IMAGE sets the canvas): a draft drawn for another
-    size is redrawn at width x height instead (its boxes rescaled), said in the note."""
+    size is redrawn at width x height instead (its boxes rescaled), said in the note.
+    `place=(x0, y0, x1, y1)` (outpaint / reframe: the source image sits in that
+    sub-rectangle of the width x height canvas): the draft is PLACED there, its boxes
+    scaled into the rectangle, not stretched over the canvas, and its summary says "no
+    other text" so the new areas get none; plain text gets the same guard."""
     if not isinstance(prompt, str):
         return prompt, width, height, None
     try:
@@ -437,8 +465,28 @@ def prepare_prompt(prompt, width=None, height=None, fit=False):
     except Exception:
         return prompt, width, height, None
     if not cz_caption.is_caption(prompt):
+        if place is not None and prompt.strip():
+            guarded = _with_no_other_text(prompt)
+            note = None if guarded == prompt.strip() else "outpaint: \"No other text.\" added to the prompt (plain text invents words in the new areas)"
+            return guarded, width, height, note
         return prompt, width, height, None
     d = cz_caption.parse(prompt)
+    if place is not None and width and height and not cz_caption.is_compiled(d):
+        lay, dw, dh = cz_caption.from_text(d)
+        px0, py0, px1, py1 = [int(round(v)) for v in place]
+        pw, ph = max(16, px1 - px0), max(16, py1 - py0)
+        draft = cz_caption.to_draft(lay, pw, ph)
+        for it in draft["items"]:
+            b = it.get("bbox")
+            if b:
+                it["bbox"] = [min(max(0, b[0] + px0), int(width)), min(max(0, b[1] + py0), int(height)),
+                              min(max(0, b[2] + px0), int(width)), min(max(0, b[3] + py0), int(height))]
+        draft["width"], draft["height"] = int(width), int(height)
+        draft["summary"]["caption"] = _with_no_other_text(draft["summary"].get("caption", ""))
+        compiled, cw, ch = cz_caption.compile(draft)
+        return compiled, cw, ch, (f"layout drawn for {dw}x{dh}: placed on the source image at "
+                                  f"({px0}, {py0}) to ({px1}, {py1}) of the {int(width)}x{int(height)} "
+                                  f"canvas, \"no other text\" around it")
     if cz_caption.is_compiled(d):
         gw, gh = cz_caption.guess_canvas(d)
         if width and height and (gw > int(width) or gh > int(height)):
@@ -467,7 +515,7 @@ class MossPipe:
 
     _OWN = {"_pipe", "repo", "variant", "_said", "_cfg", "_all_hooks", "_tr_pre",
             "_te_on_gpu", "_offload_device", "released", "_neg_cache", "skip_layers",
-            "_generator", "_lm_head", "_vl_processor"}
+            "_generator", "_lm_head", "_vl_processor", "_swap_dit", "_dit_parked"}
 
     def __init__(self, pipe, repo=DEFAULT_REPO):
         object.__setattr__(self, "_pipe", pipe)
@@ -481,6 +529,8 @@ class MossPipe:
             object.__setattr__(self, k, None)
         object.__setattr__(self, "_all_hooks", [])
         object.__setattr__(self, "_te_on_gpu", False)
+        object.__setattr__(self, "_swap_dit", False)
+        object.__setattr__(self, "_dit_parked", False)
         object.__setattr__(self, "released", False)
         object.__setattr__(self, "skip_layers", tuple(UNCOND_SKIP_LAYERS))
 
@@ -539,7 +589,14 @@ class MossPipe:
     # soon as the DiT runs (or at the end of the call, Stop and errors included). Same
     # method name, so every enable_model_cpu_offload() of cz_pipeline gets it. No
     # accelerate hook on any component.
-    def enable_model_cpu_offload(self, gpu_id=None, device=None):
+    def enable_model_cpu_offload(self, gpu_id=None, device=None, swap_dit=None):
+        """The encoder-only offload: the DiT and the VAE stay on the card, the 9B
+        encoder comes in for the prompts and leaves at the first DiT forward.
+        `swap_dit` (config `moss_encode_swap`, default on): while the encoder is on the
+        card, the DiT steps aside to the RAM, so the two never sit there together (the
+        bf16 encoder alone made the peak 27 to 30 GB on a 32 GB card; the swap costs
+        about a second each way per new prompt). A quantized encoder never moves, so the
+        swap is moot and off."""
         p = self._pipe
         self.remove_all_hooks()
         dev = torch.device(device) if device is not None else torch.device(
@@ -553,17 +610,29 @@ class MossPipe:
             return
         if not _is_quantized(te):
             te.to("cpu")
+        if swap_dit is None:
+            swap_dit = encode_swap_setting()
+        swap_dit = bool(swap_dit) and not _is_quantized(te) and not _is_quantized(p.transformer)
         object.__setattr__(self, "_offload_device", dev)
         object.__setattr__(self, "_all_hooks", ["text_encoder"])   # cz_pipeline counts it
         object.__setattr__(self, "_te_on_gpu", False)
+        object.__setattr__(self, "_swap_dit", swap_dit)
+        object.__setattr__(self, "_dit_parked", False)
+        if swap_dit:
+            self._say_once("swap", "offload: the DiT steps aside to the RAM while a prompt is "
+                                   "encoded (moss_encode_swap), so the encoder never shares "
+                                   "the card with it")
 
         def tr_pre(module, args):
-            if self._te_on_gpu:
+            if self._te_on_gpu or self._dit_parked:
                 self._encoder_out()
         object.__setattr__(self, "_tr_pre", [p.transformer.register_forward_pre_hook(tr_pre)])
 
     def _encoder_in(self):
         if self._offload_device is not None and not self._te_on_gpu:
+            if self._swap_dit and not self._dit_parked:
+                self._pipe.transformer.to("cpu")
+                object.__setattr__(self, "_dit_parked", True)
             te = self._pipe.text_encoder
             if not _is_quantized(te):
                 te.to(self._offload_device)
@@ -575,6 +644,9 @@ class MossPipe:
             if not _is_quantized(te):
                 te.to("cpu")
             object.__setattr__(self, "_te_on_gpu", False)
+        if self._dit_parked:
+            self._pipe.transformer.to(self._offload_device)
+            object.__setattr__(self, "_dit_parked", False)
 
     def remove_all_hooks(self):
         for h in list(self._tr_pre or []):
@@ -585,6 +657,10 @@ class MossPipe:
         object.__setattr__(self, "_tr_pre", None)
         object.__setattr__(self, "_all_hooks", [])
         object.__setattr__(self, "_te_on_gpu", False)
+        if getattr(self, "_dit_parked", False) and self._offload_device is not None:
+            self._pipe.transformer.to(self._offload_device)
+        object.__setattr__(self, "_dit_parked", False)
+        object.__setattr__(self, "_swap_dit", False)
         object.__setattr__(self, "_offload_device", None)
         self._pipe.remove_all_hooks()
 

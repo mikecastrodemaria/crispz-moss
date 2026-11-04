@@ -76,7 +76,7 @@ Windows, torch 2.11 cu128, bf16, offload `auto` (encoder only), 50 steps, CFG 3.
 |---|---|
 | Load from the cache | 25 to 30 s |
 | VRAM at rest | 9.7 GB allocated (DiT + VAE) |
-| 1024x1024 | 43 s (0.85 s/step), 15 GB peak once the prompt is cached; 27 GB while a new prompt is encoded (21 GB flat with the nf4 encoder) |
+| 1024x1024 | 43 s (0.85 s/step), 15 GB peak once the prompt is cached; 27 GB while a new prompt was encoded before `moss_encode_swap` (the DiT now steps aside: about 19 GB expected, to measure), 21 GB flat with the nf4 encoder |
 | 1456x1456 (2 Mpx) | 102 s (2.0 s/step), 15.6 GB peak |
 | 2048x1152 | 116 s (2.3 s/step), 15.7 GB peak |
 | Stop | the partial image comes back 0.8 s after the request |

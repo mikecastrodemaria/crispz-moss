@@ -62,14 +62,14 @@
     "_live_preview_help": "Show the image as it forms, during the denoise (Fooocus-style), in the Result gallery itself, where the finished image then replaces it. FLUX.2 hands its latents packed (128 channels, one token per 16x16 block) and they are projected straight to RGB through a 128x3 matrix fitted against THIS VAE -- a matmul on the token grid, where a real VAE decode would cost 0.2-0.5 s a step. MOSS-Image shares that VAE and packs its tokens in the same order, so the same matrix applies (error 35 on 255 at the last step, measured on the 5090). It is an approximation (R2 0.88): the composition and the broad colours are right, the fine detail is not. every_n_steps=2 or 3 refreshes less often, max_side caps the image sent to the browser. enabled=false removes the whole thing: no callback on the denoise, no frames, zero cost. Advanced > Generation has the same switch, applied live.",
     "caption_model": "blip-large",
     "_caption_model_help": "Auto-describe model: blip-large (default, local) | blip-base | ollama:<vision model> (listed in Prompt AI once Ollama is detected; blip-large takes over if Ollama fails)",
-    "_performance_presets_help": "name -> [steps, guidance] or [steps, guidance, lora_file]. MOSS-Image: 50 steps and CFG 3.0 (the official settings; 3 to 6 advised, raise it for short prompts). Draft (25 steps) is a quick look on the base model (judge it on bench/lot3); the community 4-step LoRA and the 8-step DMD adapter need the LoRA loader (lot 4): the DMD release also replaces the time embedding and samples with its own data-space loop, not the release scheduler.",
+    "_performance_presets_help": "name -> [steps, guidance] or [steps, guidance, lora_file]. MOSS-Image: 50 steps and CFG 3.0 (the official settings; 3 to 6 advised, raise it for short prompts). Draft (12 steps) is a quick look on the base model (measured on the 5090, bench/lot3: the texts hold at 12 steps, details may move; 25 s instead of 85 for a 1.9 Mpx poster); the community 4-step LoRA and the 8-step DMD adapter need the LoRA loader (lot 4): the DMD release also replaces the time embedding and samples with its own data-space loop, not the release scheduler.",
     "performance_presets": {
         "MOSS (50 steps)": [
             50,
             3.0
         ],
-        "Draft (25 steps)": [
-            25,
+        "Draft (12 steps)": [
+            12,
             3.0
         ]
     },
@@ -272,6 +272,8 @@
     "_moss_model_help": "Base repo (HF) or a local diffusers folder of MOSS-Image: OpenMOSS-Team/MOSS-Image-SFT (default, general use) or OpenMOSS-Team/MOSS-Image-Base (LoRA base, rawer). Apache 2.0, public, about 27 GB on disk (DiT 10.2 + Qwen3.5-9B encoder 16.8 + VAE 0.25). Env MOSS_MODEL. Ideogram and FLUX files are refused (they run in crispz-ideogram / crispz-flux3 / crispz-klein).",
     "moss_transformer": "",
     "_moss_transformer_help": "A single-file MOSS-Image DiT (ComfyUI / CivitAI layout: the Comfy-Org repack, CivitAI's 'MOSS Image' and merges such as Dirty-Moss) in bf16 or int8 ConvRot (dequantized to bf16 in RAM at load time, the saving is disk only); the 4-bit builds are refused by name. The VAE and the text encoder still come from moss_model. Empty = the repo's own DiT. Env MOSS_TRANSFORMER.",
+    "moss_encode_swap": true,
+    "_moss_encode_swap_help": "Encoder-only offload ('model' / 'auto' under 40 GB): while the bf16 text encoder (16.8 GB) is on the card to encode a new prompt, the DiT (10 GB) steps aside to the RAM, so the two never share the card (measured peak 27 to 30 GB without it on a 32 GB card, about 19 expected with it). Costs about a second each way per NEW prompt (cached prompts never touch the encoder). false = the DiT stays; moot with the nf4 encoder (resident). Env MOSS_ENCODE_SWAP.",
     "moss_precision": "bf16",
     "_moss_precision_help": "Precision of the Qwen3.5-9B TEXT ENCODER (the DiT is always bf16): 'bf16' (16.8 GB, measured) or 'nf4' (bitsandbytes, ~5.6 GB, NOT measured on the 5090 yet). Env MOSS_PRECISION."
 }

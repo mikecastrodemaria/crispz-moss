@@ -294,3 +294,38 @@ def test_a_layout_draft_follows_the_image_size_in_img2img():
     assert out.size == (320, 256)
     assert any("rescaled to the image's 320x256" in m for m in said), said
 
+
+def test_outpaint_and_reframe_place_the_draft_and_guard_the_new_areas():
+    """The outpaint and reframe paths hand the source rectangle to the engine: the
+    compiled prompt the adapter receives keeps the draft's boxes inside it and says
+    "no other text"; a plain prompt gets the guard too."""
+    import cz_caption
+    import cz_design
+    draft = cz_design.prompt_of("Logo (square)")
+    # The compiled text is turned into embeddings by cz_pipeline's cache before the
+    # adapter sees it: the compilation itself is observed.
+    made = []
+    real = cz_moss.prepare_prompt
+
+    def spy(prompt, width=None, height=None, fit=False, place=None):
+        out = real(prompt, width, height, fit=fit, place=place)
+        made.append((place, out))
+        return out
+    cz_moss.prepare_prompt = spy
+    try:
+        _run(lambda: P.outpaint_directions(_img(256, 256), None, ["right"], draft, 3, 1))
+        place, (text, w, h, note) = made[-1]
+        assert place is not None and place[0] == 0 and place[2] < w     # the source, left part
+        d = cz_caption.parse(text)
+        assert cz_caption.is_compiled(d) and "no other text" in d["summary"]["caption"].lower()
+        assert w > h and CALLS[-1]["width"] == w                        # the canvas grew to the right
+        lay, _, _ = cz_caption.from_text(text, w, h)
+        for it in lay["items"]:
+            x0, y0, x1, y1 = cz_caption.bbox_to_pixels(it["bbox"], w, h)
+            assert x1 <= place[2] + 3, (it, x1, place)
+        _run(lambda: P.reframe(_img(256, 256), 16, 9, "contain", "a plain poster", 3, 1))
+        place, (text, _, _, _) = made[-1]
+        assert place is not None and text.endswith("No other text.")
+    finally:
+        cz_moss.prepare_prompt = real
+

@@ -321,7 +321,7 @@ def test_model_offload_moves_only_the_text_encoder():
               negative_prompt="blurry")
     ref = pipe(prompt="GRAND OPENING", generator=_gen(3), **kw).images
     raw = pipe._pipe
-    pipe.enable_model_cpu_offload(device="cpu")
+    pipe.enable_model_cpu_offload(device="cpu", swap_dit=False)
     assert pipe._all_hooks and not getattr(raw, "_all_hooks", None)
     for name in ("text_encoder", "transformer", "vae"):
         assert not hasattr(getattr(raw, name), "_hf_hook"), name
@@ -373,3 +373,53 @@ def test_release_drops_the_weights():
     assert pipe.released
     with pytest.raises(RuntimeError, match="released"):
         pipe(prompt="x", width=256, height=256, num_inference_steps=1)
+
+
+def test_encode_swap_parks_the_dit_while_the_encoder_is_on_the_card():
+    """moss_encode_swap (lot 3b): under the encoder-only offload the DiT leaves for the
+    RAM when the encoder comes in, and is back before its first forward; cached prompts
+    move nothing; the image is unchanged; a quantized encoder or swap_dit=False keeps
+    the DiT still. Execution device = CPU: what is checked is the ORDER of the moves."""
+    pipe = tiny_pipe()
+    kw = dict(width=256, height=256, num_inference_steps=3, output_type="np",
+              negative_prompt="blurry")
+    ref = pipe(prompt="GRAND OPENING", generator=_gen(3), **kw).images
+    raw = pipe._pipe
+    pipe.enable_model_cpu_offload(device="cpu", swap_dit=True)
+    assert pipe._swap_dit and not pipe._dit_parked
+    moves = []
+    te_to, tr_to = raw.text_encoder.to, raw.transformer.to
+    raw.text_encoder.to = lambda *a, **k: moves.append(("te", str(a[0]))) or te_to(*a, **k)
+    raw.transformer.to = lambda *a, **k: moves.append(("tr", str(a[0]))) or tr_to(*a, **k)
+    try:
+        out = pipe(prompt="GRAND OPENING", generator=_gen(3), **kw).images
+    finally:
+        del raw.text_encoder.to, raw.transformer.to
+    # negative miss: DiT out, encoder in; the positive reuses the encoder already there;
+    # first DiT forward: encoder out, DiT back. Exactly one round trip each.
+    assert moves == [("tr", "cpu"), ("te", "cpu"), ("te", "cpu"), ("tr", "cpu")], moves
+    assert not pipe._te_on_gpu and not pipe._dit_parked
+    assert np.array_equal(np.asarray(out), np.asarray(ref))
+    # a prompt handed as embeddings with the negative cached: nothing moves at all
+    emb = pipe.encode_prompt("GRAND OPENING")
+    assert not pipe._dit_parked                                   # back after the encoding
+    moves.clear()
+    raw.text_encoder.to = lambda *a, **k: moves.append(("te", str(a[0]))) or te_to(*a, **k)
+    raw.transformer.to = lambda *a, **k: moves.append(("tr", str(a[0]))) or tr_to(*a, **k)
+    try:
+        pipe(prompt=None, prompt_embeds=emb[0], generator=_gen(3), **kw)
+        # the magic prompt path parks the DiT for the whole generation too
+    finally:
+        del raw.text_encoder.to, raw.transformer.to
+    assert moves == [], moves
+    pipe.remove_all_hooks()
+    assert not pipe._swap_dit and not pipe._dit_parked
+    # the setting: env wins, else the config, default on
+    import os
+    os.environ["MOSS_ENCODE_SWAP"] = "0"
+    try:
+        assert cz_moss.encode_swap_setting() is False
+    finally:
+        del os.environ["MOSS_ENCODE_SWAP"]
+    assert cz_moss.encode_swap_setting() is True
+

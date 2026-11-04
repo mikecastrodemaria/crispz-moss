@@ -807,6 +807,43 @@ Lecture :
   10 à 14 fichiers par seconde en anonyme, soit environ une heure par lot : dit dans
   l'UI. Test : `test_renders_on_disk_come_first` (hub mocké). Suite : 67 fichiers sur 67.
 
+### Lot 3b (05/11/2026) : placement du draft, sortie du DiT pendant l'encodage, Draft 12 steps
+
+Les trois points ouverts du premier passage GPU du lot 3, lancés sur « passe au step
+suivant » de Mike (04/11/2026), livrés sur `wip/moss-engine`, mesure GPU à faire.
+- **Placement du draft en outpaint et reframe** : `prepare_prompt(..., place=(x0, y0,
+  x1, y1))` reporte les boîtes d'un draft dans le sous-rectangle du canevas où l'image
+  source est collée (mise à l'échelle dans ce rectangle, jamais étirée sur le canevas) et
+  force « No other text. » dans le résumé ; un prompt en texte libre reçoit le même
+  garde-fou (ajouté une fois, dit). `outpaint_directions` calcule le rectangle (marges
+  gauche et haut, puis l'échelle de `_cap_work_res`), `reframe` passe `(ox, oy, ox + rw2,
+  oy + rh2)` ; les deux le donnent à `_qwen_call` par `layout_box`, consommé avant le
+  cache d'embeddings. Inpaint et refine gardent `fit` (l'image entière).
+  `gpu_lot3_check.py` outpaint et reframe avec le draft placé par défaut, `--plain` pour
+  l'ancien comportement. À juger sur les mêmes rendus : plus de faux textes ?
+- **Sortie du DiT pendant l'encodage** (`moss_encode_swap`, défaut true, env
+  `MOSS_ENCODE_SWAP`) : sous l'offload « encodeur seul », `_encoder_in` gare le DiT en RAM
+  avant de monter l'encodeur, `_encoder_out` (fin d'encodage, ou le pré-hook du premier
+  forward du DiT) le remonte. Les deux ne partagent plus jamais la carte : pic attendu
+  ~19 Go au lieu de 27 à 30 sur un prompt neuf, coût ~1 s par sens par prompt NEUF (un
+  prompt en cache ne bouge rien). Sans effet avec l'encodeur nf4 (résident, jamais
+  déplacé). Le magic prompt local et le Describe local en profitent aussi : 10 Go
+  libérés pendant la génération. `_execution_device` reste cuda pendant la garde (le VAE
+  y est, diffusers préfère un composant hors CPU). Dit une fois dans le log.
+  Test : `test_encode_swap_parks_the_dit_while_the_encoder_is_on_the_card` (ordre exact
+  des déplacements, image identique, rien ne bouge sur un prompt en cache).
+- **Preset « Draft (12 steps) »** [12, 3.0] remplace « Draft (25 steps) » (cz_ui,
+  config-sample, aide) : le texte tenait à 12 steps sur la 5090 (24,8 s contre 85 s).
+  ATTENTION : un `config.txt` local qui a copié `performance_presets` garde l'ancien.
+- Tests : +3 (`test_prepare_prompt_places_a_draft_on_the_source_image`,
+  `test_outpaint_and_reframe_place_the_draft_and_guard_the_new_areas`, le swap) ; le test
+  d'offload existant passe `swap_dit=False` (il vérifie que le DiT ne bouge pas sans
+  swap). Suite complète : **67 fichiers sur 67** ; smoke 22/22 ; `check_config_keys` OK
+  (123 clés).
+- À faire chez Mike : `git pull`, carte libre, `.venv\Scripts\python tools\gpu_lot3_check.py
+  --skip-draft` ; regarder le pic du premier img2img (attendu ~19 Go au lieu de 30), et
+  `3_outpaint_right.png` / `4_reframe_16x9.png` (zones neuves sans texte inventé ?).
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
