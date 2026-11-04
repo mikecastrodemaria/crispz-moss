@@ -603,6 +603,15 @@ produisent un JSON valide et une image dont les textes sont aux boîtes demandé
   (boîte « 5B » dessinée trop étroite par le LLM, texte entier gardé par MOSS).
 - Describe local : valide, textes relus, boîtes à juger sur `describe_logo_boxes.png`.
 - Moteurs : Ollama par défaut (12 à 20 s), local en secours (77 s), Describe local 78 s.
+- Modèle Ollama de Mike (quatrième passage, 18:04, mêmes résultats : Describe 76,1 s
+  valide, magic 20,4 et 12,8 s) :
+  `tinyrick/gemma-4-31B-it-uncensored-heretic-vision-llmfan46:Q4_K_M`, un Gemma 4 31B
+  Q4_K_M (~18 Go) À VISION, qui cohabite sur la carte avec le DiT résident (10 Go) : le
+  premier appel de 110 s était son chargement. Conséquence : le « Describe par Ollama »
+  (image en base64, même brief) devient immédiat avec ce modèle, sans rien ajouter ;
+  à mesurer si Mike le veut (le Describe local reste la voie sans Ollama). Note : un
+  finetune communautaire de Gemma suit les conditions Gemma, qui ne revendiquent rien
+  sur les sorties ; il ne produit que du texte de brief, jamais les images.
 Reste à juger par Mike : `describe_logo_boxes.png` (boîtes sur le symbole et le texte ?)
 et les drafts `magic_*.json` à l'œil. Puis feu vert pour le lot 3.
 
