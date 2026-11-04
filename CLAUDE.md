@@ -583,8 +583,28 @@ Lecture sur images (les six rendus, lus en session) :
   Le rapport n'écrivait pas le modèle Ollama utilisé : ajouté (`0_env.ollama_model`).
   Layouts à la main identiques (89,0 s et 91,9 s : le premier rendu à froid coûte
   toujours 85 à 90 s).
-- À relancer chez Mike : `git pull`, puis `tools\gpu_lot2_check.py --engine ollama`
-  (le Describe est à juger : `describe_logo_boxes.png`, et le rapport dira le modèle).
+- **Troisième passage, après le correctif** (`--engine ollama`, 17:57, 6 minutes) :
+  Describe local du logo **78,3 s, JSON valide, aucune note, « BEAN THERE » relu,
+  2 items** (symbole et texte). Magic prompt Ollama 20,1 s et 13,4 s (modèle déjà
+  chargé), JSON valides, textes présents ; layouts à la main 75,2 s et 90,0 s.
+  Le Describe à 78 s, c'est la même génération token par token que le magic prompt
+  local (replis torch) ; acceptable pour un bouton ponctuel, et seule voie pour lire
+  l'image sans second modèle en VRAM. Piste si Mike le juge lent : Describe par Ollama
+  avec un modèle à vision (même brief, image en base64), à décider plus tard.
+
+### Bilan du lot 2 (04/11/2026) : critères d'acceptation atteints, verdict de Mike attendu
+
+Acceptation du cahier : « une légende à la main et une légende du magic prompt
+produisent un JSON valide et une image dont les textes sont aux boîtes demandées ».
+- Légende à la main : 2 rendus, 3 textes sur 3 exacts, chaque texte et chaque objet
+  dans sa boîte (vu sur `hand_logo_boxes.png`, `hand_poster_boxes.png`).
+- Magic prompt : 4 drafts valides sur 4 (2 local, 2 Ollama), textes demandés présents,
+  aucun texte ajouté ; placement tenu sur le logo, approximatif sur l'affiche suisse
+  (boîte « 5B » dessinée trop étroite par le LLM, texte entier gardé par MOSS).
+- Describe local : valide, textes relus, boîtes à juger sur `describe_logo_boxes.png`.
+- Moteurs : Ollama par défaut (12 à 20 s), local en secours (77 s), Describe local 78 s.
+Reste à juger par Mike : `describe_logo_boxes.png` (boîtes sur le symbole et le texte ?)
+et les drafts `magic_*.json` à l'œil. Puis feu vert pour le lot 3.
 
 ## 10. Sources
 
