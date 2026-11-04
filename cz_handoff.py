@@ -1,13 +1,13 @@
-"""crispz-ideogram - hand an image over to crispz-flux3 for editing (lot 5).
+"""crispz-moss - hand an image over to crispz-flux3 for editing (lot 5).
 
-Ideogram 4 has no editing pipeline, and the cloud editor of Ideogram 4.5 is not used
-here: reference editing is done by crispz-flux3, the sibling studio, on the same machine.
+MOSS-Image has no editing pipeline: reference editing is done by crispz-flux3, the
+sibling studio, on the same machine.
 The hand-over goes through crispz-flux3's OWN command line, the family protocol v1
 (`cz_protocol.py edit --spec -`), so crispz-flux3 decides how to run it:
 
   - its app is running  -> the edit is queued in that instance (model warm, its queue
                            serializes the GPU);
-  - its app is closed   -> it loads FLUX.3 in a separate process (cold). crispz-ideogram
+  - its app is closed   -> it loads FLUX.3 in a separate process (cold). crispz-moss
                            first frees its own VRAM (said in the log): two models of
                            15 to 20 GB do not share a 32 GB card.
 
@@ -155,7 +155,7 @@ def edit(image, instruction, refs=(), seed=-1, output_dir=None, free_vram=None):
         route = "cold"
         args.append("--local")
         _log(f"HANDOFF: {TARGET} is not running: it loads FLUX.3 in its own process "
-             f"(cold, slower); crispz-ideogram frees its VRAM first. Files in {folder}")
+             f"(cold, slower); crispz-moss frees its VRAM first. Files in {folder}")
         if free_vram is not None:
             free_vram()
     code, res = _czp(args, spec)

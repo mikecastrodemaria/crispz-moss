@@ -242,7 +242,7 @@ def caps_dict():
             # input + 1 ref (spec.refs). Light listing, nothing is downloaded.
             "edit_loras": _edit_lora_catalog(),
             # Fast modes spec.fast accepts on the edit op.
-            # Ideogram 4 has no edit pipeline and no Lightning LoRA: the list comes
+            # MOSS-Image has no edit pipeline and no Lightning LoRA: the list comes
             # down to 'off' and the UI hides the control. The field stays present
             # (not absent) so that family clients always read the same one.
             "edit_fast": ["off"]}
@@ -478,7 +478,7 @@ def validate_spec(spec, op="gen"):
         else:
             warnings.append("'guidance' not applied (v1: instance settings win)")
     # (crispz-klein warned here that guidance had no effect: true of a distilled model,
-    # false of Ideogram 4, where it is the peak of the per-step schedule. Removed.)
+    # false of MOSS-Image, a real CFG. Removed.)
     refs = [str(r) for r in (spec.get("refs") or []) if str(r).strip()]
     # MOSS-Image takes no reference image: refs are dropped WITH a warning that says
     # where reference editing lives (crispz-flux3 locally).

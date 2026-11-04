@@ -34,7 +34,7 @@ def test_remove_bg_failure_is_said(monkeypatch):
 
 
 def test_the_flux3_edit_tab_and_input_mode_are_hidden():
-    """Ideogram 4 does not edit: the inherited FLUX.3 'Edit (references)' tab and input
+    """MOSS-Image does not edit: the inherited FLUX.3 'Edit (references)' tab and input
     mode must not be offered (editing goes to the Edit in crispz-flux3 tab)."""
     import gradio as gr
     demo = cz_ui.build_ui()
@@ -46,8 +46,10 @@ def test_the_flux3_edit_tab_and_input_mode_are_hidden():
     assert radios and radios[0].visible is False
 
 
-def test_no_visible_flux3_wording_in_the_ui():
-    """The inherited FLUX.3 wording stays only in hidden components and comments."""
+def test_no_visible_flux3_or_ideogram_wording_in_the_ui():
+    """The inherited FLUX.3 and Ideogram wording stays only in hidden components and
+    comments (a visible mention of Ideogram is allowed only to name crispz-ideogram as
+    the studio that runs a refused file, or Ideogram LoRAs as refused)."""
     import gradio as gr
     demo = cz_ui.build_ui()
     parents = {}
@@ -67,6 +69,9 @@ def test_no_visible_flux3_wording_in_the_ui():
             continue
         for attr in ("label", "info", "placeholder", "value"):
             v = getattr(b, attr, None)
-            if isinstance(v, str) and ("FLUX.3" in v or "FLUX 3" in v):
+            if not isinstance(v, str):
+                continue
+            plain = v.replace("crispz-ideogram", "").replace("Ideogram LoRAs", "")
+            if "FLUX.3" in v or "FLUX 3" in v or "ideogram" in plain.lower():
                 bad.append(f"{type(b).__name__}.{attr}: {v[:80]}")
     assert not bad, bad

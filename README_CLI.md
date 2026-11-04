@@ -1,4 +1,4 @@
-# crispz-ideogram: CLI cheat sheet
+# crispz-moss: CLI cheat sheet
 
 All commands are `python app.py ...` (use your venv: `.venv\Scripts\python app.py ...`).
 Run `python app.py --help` for the full flag list. No args → launches the UI.
@@ -13,15 +13,17 @@ Common output flags (work with most modes):
 ## Text → Image (txt2img)
 
 ```bash
-# Basic (Ideogram 4: 48 steps, guidance 7 = the peak of its per-step schedule; no
-# negative prompt). Plain text works, a JSON caption works better (see README.md).
+# Basic (MOSS-Image: 50 steps, CFG 3.0, a real negative prompt). Plain text works, a
+# layout JSON works better (see README.md).
 python app.py --txt2img --prompt "a bold minimalist poster reading GRAND OPENING" \
-    --gen-width 1024 --gen-height 1024 --gen-steps 48 --guidance 7 --seed 42 \
+    --negative "nsfw, worst quality, bad anatomy, watermark, jpeg artifact" \
+    --gen-width 1024 --gen-height 1024 --gen-steps 50 --guidance 3 --seed 42 \
     --save-mode local --output-dir out
 
-# A JSON caption from a file (made in the UI's caption editor, or by hand)
-python app.py --txt2img --prompt "$(cat poster.json)" \
-    --gen-width 720 --gen-height 1024 --gen-steps 48 --save-mode local --output-dir out
+# A layout draft from a file (made in the UI's layout editor, or by hand): it renders at
+# the size written in the draft
+python app.py --txt2img --prompt "$(cat poster.json)" --gen-steps 50 \
+    --save-mode local --output-dir out
 
 # Generate then upscale in ONE command (txt2img chained into ESRGAN + diffusion refine).
 # This is the CLI equivalent of the UI's "Upscale after generate" checkbox.
@@ -47,11 +49,11 @@ contact sheet(s) in `<output>/xyz_<timestamp>/` (one per Z value; paths printed)
 ```bash
 # 3×2 grid: Steps × Guidance
 python app.py --txt2img --prompt "a red cat" \
-    --xyz "Steps=24,36,48" --xyz "Guidance=5, 7" --save-mode local
+    --xyz "Steps=12,25,50" --xyz "Guidance=3, 5" --save-mode local
 
 # Compare checkpoints (partial names resolve case-insensitively), one sheet per seed
 python app.py --txt2img --prompt "..." \
-    --xyz "Seed=42, 1234" --xyz "Guidance=5, 7"
+    --xyz "Seed=42, 1234" --xyz "Guidance=3, 5"
 
 # Full-prompt A/B test (each value = a COMPLETE prompt; quotes protect commas).
 # --prompt becomes optional when a Prompt axis is given.
@@ -81,17 +83,16 @@ In the UI, the values fields autosuggest after 3 typed characters (checkpoints/L
 on those axes, `__wildcards__` on the Prompt axes).
 **Ctrl+C assembles a partial sheet** with the cells rendered so far.
 
-## Choose the Ideogram 4 model
+## Choose the MOSS-Image model
 
 ```bash
-# Another repo or a local diffusers folder (a mirror, a local copy of the nf4 weights)
-python app.py --txt2img --prompt "..." --ideogram-model "D:/models/ideogram-4-nf4-diffusers"
+# Another repo or a local diffusers folder (the Base checkpoint, a mirror, a local copy)
+python app.py --txt2img --prompt "..." --moss-model "OpenMOSS-Team/MOSS-Image-Base"
 
-# Transformer from a diffusers repo/folder (keeps the base VAE/encoder). Single-file
-# Ideogram 4 transformers (ComfyUI fp8 / int8 / nvfp4) are refused with the reason.
-python app.py --txt2img --prompt "..." --ideogram-transformer "<hf-repo-or-folder>"
+# DiT from a single ComfyUI / CivitAI file (bf16, fp8 or int8 ConvRot; the 4-bit builds
+# are refused with the reason). The VAE and the text encoder stay the repo's.
+python app.py --txt2img --prompt "..." --moss-transformer "D:/models/moss_image_bf16.safetensors"
 ```
-(`--flux3-model` / `--flux3-transformer` are kept as aliases.)
 
 ## LoRA (up to 3, combinable) : `--lora NAME[:WEIGHT]`
 
@@ -109,7 +110,7 @@ python app.py --txt2img --prompt "..." --loras-dir "D:/.../loras" \
 ```bash
 python app.py --vision-mix person.jpg outfit.jpg --save-mode local --output-dir out
 # pick the model explicitly
-python app.py --vision-mix a.png b.png --ollama-model llava:13b-v1.6 --gen-steps 48
+python app.py --vision-mix a.png b.png --ollama-model llava:13b-v1.6 --gen-steps 50
 ```
 
 ## Improve the prompt before generating : `--improve` (needs Ollama)
@@ -206,7 +207,7 @@ python app.py --remove-bg -i photo.jpg --save-mode local --output-dir out
 ```bash
 # contain (default): keep the whole image, OUTPAINT the borders to the ratio
 python app.py --reframe 16:9 -i square.png --prompt "extend the scenery" \
-    --gen-steps 48 --save-mode local --output-dir out
+    --gen-steps 50 --save-mode local --output-dir out
 
 # cover: fill the ratio then centre-crop: no generation, instant
 python app.py --reframe 16:9 --reframe-fit cover -i square.png -o out/wide.png
@@ -216,7 +217,7 @@ python app.py --reframe 16:9 --reframe-fit cover -i square.png -o out/wide.png
 
 ```bash
 python app.py --expand right,bottom -i photo.png --prompt "landscape, nature" \
-    --gen-steps 48 --save-mode local --output-dir out
+    --gen-steps 50 --save-mode local --output-dir out
 # 'all' = the four sides; --expand-ratio 0.2 changes the growth per side
 # (--expand-lora, the FLUX.3 Outpaint LoRA, runs in crispz-flux3: refused here.)
 ```
@@ -226,7 +227,7 @@ python app.py --expand right,bottom -i photo.png --prompt "landscape, nature" \
 ```bash
 # repaint the WHITE area of mask.png (same size as the input), guided by the prompt
 python app.py -i photo.png --inpaint-mask mask.png --prompt "a red rose" \
-    --gen-steps 48 --save-mode local --output-dir out
+    --gen-steps 50 --save-mode local --output-dir out
 # --inpaint-denoise 1.0 (default) = full repaint; lower keeps more of the original
 ```
 
@@ -286,10 +287,11 @@ echo "saved: $dst"
 ---
 
 ### Notes
-- Ideogram 4 loads from its diffusers repo (nf4); single-file checkpoints (ComfyUI fp8 /
-  int8 / nvfp4) are refused with the reason.
-- 48 steps and guidance 7 are the official settings; the Draft preset uses 24 steps.
-- img2img, inpaint and outpaint are EMULATED (Ideogram 4 has no native pipeline for
+- MOSS-Image loads from its diffusers repo (bf16, public); single-file DiTs and text
+  encoders in the ComfyUI / CivitAI layout load too (bf16, fp8, int8 ConvRot), the 4-bit
+  builds are refused with the reason.
+- 50 steps and CFG 3.0 are the official settings; the Draft preset uses fewer steps.
+- img2img, inpaint and outpaint are EMULATED (MOSS-Image has no native pipeline for
   them): `--gen-steps` is the full schedule, the denoise picks the part that runs.
 - Output filenames are dated + unique (`{date}_{tag}_seed{seed}_{w}x{h}`), set by
   `filename_pattern` in `config.txt`.

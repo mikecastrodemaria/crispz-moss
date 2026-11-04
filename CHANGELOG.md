@@ -48,6 +48,11 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   A layout draft used in img2img is rescaled to the image instead of forcing its own
   size. The protocol announces `img2img` and `inpaint` as emulated. The Draft preset on
   the distilled DMD / 4-step adapters waits for the LoRA loader (lot 4).
+- **Ideogram leftovers removed** (2026-11-04): the Ideogram engine and its tests are
+  gone (its family markers live in `cz_moss`, so an Ideogram file is still refused by
+  name), every script, module header, UI help, CLI message and document says
+  crispz-moss / MOSS-Image, the install and update scripts check the MOSS stack
+  (transformers Qwen3.5, diffusers FLUX.2 VAE), and the Text encoder selector is live.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0

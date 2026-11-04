@@ -1,4 +1,4 @@
-"""crispz-klein told its 4B and 9B apart by width. Since crispz-flux3 (and here, Ideogram 4)
+"""crispz-klein told its 4B and 9B apart by width. Since crispz-flux3 (and here, MOSS-Image)
 the FAMILY is read from the tensor names instead, and the width helpers below only serve
 to NAME a FLUX.2 file in a message.
 

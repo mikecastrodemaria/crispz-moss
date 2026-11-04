@@ -1,4 +1,4 @@
-# crispz-ideogram : a locked environment, an ISOLATED venv.
+# crispz-moss : a locked environment, an ISOLATED venv.
 #
 # WHY THIS FILE
 # requirements.txt gives the bounds ("what has to work"). This file gives the
@@ -55,9 +55,9 @@ gguf==0.19.0
 # hf_xet: the HF repos are on Xet Storage; without it, huggingface_hub falls back to
 # plain HTTP (very slow on the big files) and warns on every download.
 hf_xet==1.7.0
-# bitsandbytes: the official Ideogram 4 weights are nf4 through bitsandbytes (both
-# transformers AND the text encoder, quant_method "bitsandbytes" in their config.json).
-# Missing here, an isolated install.bat venv could not load the model at all.
+# bitsandbytes: the optional nf4 quantization of the Qwen3.5-9B text encoder
+# (moss_precision "nf4": the encoder stays resident at ~6 GB instead of shuttling 17 GB).
+# Missing here, an isolated install.bat venv could not use that option at all.
 # 0.50.2 ships a win_amd64 wheel; to be confirmed on the 5090 (lot 1).
 bitsandbytes==0.50.2
 # outlines: the local magic prompt's JSON constraint (lot 2). outlines-core is its

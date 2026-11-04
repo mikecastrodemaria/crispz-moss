@@ -424,7 +424,7 @@ def cli_main(argv=None):
                         help="Growth per side for --expand (fraction of the source size)")
     parser.add_argument("--expand-lora", action="store_true",
                         help="FLUX.3 only (crispz-flux3): its Outpaint LoRA is refused on "
-                             "Ideogram 4, the run stops with the reason. Use --expand alone.")
+                             "MOSS-Image, the run stops with the reason. Use --expand alone.")
     parser.add_argument("--expand-lora-weight", type=float, default=1.5, metavar="1.5",
                         help="LoRA strength for --expand-lora (the author advises 1.5)")
     parser.add_argument("--inpaint-mask", metavar="PATH",
@@ -474,11 +474,11 @@ def cli_main(argv=None):
     parser.add_argument("--esrgan-dir", help="Override ESRGAN_DIR for this run")
     # --flux3-* / --klein-* / --zimage-* are the family's older names: kept as aliases so
     # as to break no existing script.
-    parser.add_argument("--moss-model", "--ideogram-model", "--flux3-model", "--klein-model",
+    parser.add_argument("--moss-model", "--flux3-model", "--klein-model",
                         "--zimage-model", dest="zimage_model",
                         help="Override the model: a MOSS-Image HF repo or diffusers folder "
                              "(default OpenMOSS-Team/MOSS-Image-SFT, Apache 2.0, public).")
-    parser.add_argument("--moss-transformer", "--ideogram-transformer", "--flux3-transformer",
+    parser.add_argument("--moss-transformer", "--flux3-transformer",
                         "--klein-transformer", "--zimage-transformer", dest="zimage_transformer",
                         help="DiT override: a single .safetensors in the ComfyUI / CivitAI "
                              "layout (bf16 or int8 ConvRot; the 4-bit builds are refused with "
@@ -661,9 +661,9 @@ def cli_main(argv=None):
             parser.error("--expand expects a comma list among left,right,top,bottom (or 'all')")
         if args.expand_lora:
             # Refused BEFORE the 153 MB download: the FLUX.3 Outpaint LoRA's layers do not
-            # exist in Ideogram 4 (the family guard would refuse it after the download).
+            # exist in MOSS-Image (the family guard would refuse it after the download).
             parser.error("--expand-lora is the FLUX.3 Outpaint LoRA, which runs in "
-                         "crispz-flux3, not on Ideogram 4: use --expand alone")
+                         "crispz-flux3, not on MOSS-Image: use --expand alone")
             res = _maybe_faceswap(cz_pipeline.outpaint_lora(
                 Image.open(args.input), sides, args.prompt, args.gen_steps, args.seed,
                 expand=args.expand_ratio, weight=args.expand_lora_weight))

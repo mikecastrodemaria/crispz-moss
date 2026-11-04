@@ -75,7 +75,7 @@ def test_engine_setting(settings):
     assert M.engine() == "ollama"
     settings["magic_prompt_engine"] = "LOCAL"
     assert M.engine() == "local"
-    settings["magic_prompt_engine"] = "ideogram_api"
+    settings["magic_prompt_engine"] = "some_cloud_api"
     assert M.engine() == "ollama"
     assert M.visible_engines() == ("ollama", "local")
 

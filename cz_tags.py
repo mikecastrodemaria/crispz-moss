@@ -1,4 +1,4 @@
-"""crispz-ideogram - Tag autocomplete: the server-side sources.
+"""crispz-moss - Tag autocomplete: the server-side sources.
 
 Downloads the tag CSVs (the tag_autocomplete.sources config) into tags/ ONCE,
 atomically and with console progress. Any .csv dropped into tags/ becomes a client-side

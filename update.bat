@@ -1,5 +1,5 @@
 @echo off
-REM Update crispz-ideogram (Windows): fetches the GitHub commits then brings the
+REM Update crispz-moss (Windows): fetches the GitHub commits then brings the
 REM dependencies back in line with the lock, WITHOUT breaking the existing install.
 REM
 REM What it does, in order:
@@ -18,7 +18,7 @@ REM   --shared       use requirements.txt instead of the lock (a shared venv)
 
 setlocal enabledelayedexpansion
 set PYTHONUTF8=1
-title crispz-ideogram - Update
+title crispz-moss - Update
 cd /d "%~dp0"
 
 set "FORCEDEPS=0"
@@ -33,7 +33,7 @@ shift
 goto argloop
 :argdone
 
-echo === crispz-ideogram - update ===
+echo === crispz-moss - update ===
 echo.
 
 REM --- The interpreter ---
@@ -138,9 +138,9 @@ if "!HW!"=="3" (
     echo [BLOCKING] torch no longer supports this card ^(see the fix above^).
     pause & exit /b 3
 )
-!RUNPY! -c "from diffusers.modular_pipelines import Flux3DistilledAutoBlocks, Flux3AutoBlocks; print('diffusers: FLUX.3 modular blocks OK')"
+!RUNPY! -c "from transformers import Qwen3_5Model; from diffusers import AutoencoderKLFlux2, FlowMatchEulerDiscreteScheduler; print('MOSS-Image stack OK (transformers Qwen3.5, diffusers FLUX.2 VAE)')"
 if errorlevel 1 (
-    echo [ERROR] diffusers no longer ships the FLUX.2 Klein pipelines.
+    echo [ERROR] the MOSS-Image stack no longer imports ^(transformers Qwen3_5Model, diffusers FLUX.2 VAE^).
     echo   Run install.bat again, or restore: !RUNPY! -m pip install -r "%TEMP%\cz_pip_before.txt"
     pause & exit /b 1
 )

@@ -16,7 +16,7 @@ The upstream pipeline is `third_party/moss_image/pipeline_moss_image.py`, vendor
     explicit schedule, the tail of the native one for the emulated img2img of lot 3).
     tests/test_moss_engine.py checks it renders the very same image as the vendored class.
   - `MossPipe`: the adapter behind the calling convention cz_pipeline was written against
-    (the one cz_ideogram.IdeogramPipe and cz_flux3.Flux3Pipe follow):
+    (the one cz_flux3.Flux3Pipe follows):
 
         pipe(prompt=, negative_prompt=, width=, height=, num_inference_steps=, generator=,
              guidance_scale=, callback_on_step_end=, output_type=).images
@@ -137,6 +137,16 @@ _MOSS_MARKERS = ("video_embedder.", "text_embedder.", "shared_block_modulation."
                  "final_linear_video.", "final_norm_video.", "video_head_modulation.")
 _MOSS_LAYER_MARKERS = (".proj.q.", ".proj.k.", ".proj.v.", ".proj.o.", ".proj.qkv.",
                        ".proj.ffn_up_gate.", ".proj.ffn_down.")
+# Foreign families, so a stray file in a shared models folder is refused BY NAME (the
+# guard names the studio that runs it): Ideogram 4 by its own heads (crispz-ideogram),
+# and its LoRAs by their block names at the 4608 width; FLUX.2 / FLUX.3 through
+# cz_flux3's reading (one source).
+_IDEOGRAM_MARKERS = ("llm_cond_proj.", "llm_cond_norm.", "embed_image_indicator.",
+                     "adaln_proj.", "unconditional_transformer.")
+_IDEOGRAM_LAYER_MARKERS = (".attention.to_q.", ".attention.to_k.", ".attention.to_v.",
+                           ".attention.qkv.", ".attention.o.", ".attention.to_out.",
+                           ".feed_forward.w1.", ".feed_forward.w2.", ".feed_forward.w3.")
+_IDEOGRAM_HIDDEN_SIZE = 4608
 
 
 def _has_marker(key, markers):
@@ -146,8 +156,8 @@ def _has_marker(key, markers):
 
 def family_from_keys(keys):
     """'moss', 'ideogram', 'flux3', 'flux2' or None from tensor names alone. The strong
-    MOSS markers decide first; the other families are cz_ideogram's reading (one source,
-    which itself defers to cz_flux3 for FLUX)."""
+    MOSS markers decide first, then Ideogram 4's heads, then cz_flux3's reading of the
+    FLUX families (one source)."""
     keys = [k for k in keys if isinstance(k, str) and k != "__metadata__"]
     if not keys:
         return None
@@ -155,9 +165,11 @@ def family_from_keys(keys):
         return FAMILY
     if any(_has_marker(k, _MOSS_LAYER_MARKERS) for k in keys):
         return FAMILY
+    if any(_has_marker(k, _IDEOGRAM_MARKERS) for k in keys):
+        return "ideogram"
     try:
-        import cz_ideogram
-        return cz_ideogram.family_from_keys(keys)
+        import cz_flux3
+        return cz_flux3.family_from_keys(keys)
     except Exception:
         return None
 
@@ -170,13 +182,14 @@ def family_from_header(hdr):
     fam = family_from_keys(hdr.keys())
     if fam:
         return fam
-    try:
-        import cz_ideogram
-        fam = cz_ideogram.family_from_header(hdr)
-        if fam:
-            return fam
-    except Exception:
-        pass
+    for k, v in hdr.items():
+        if k == "__metadata__" or not isinstance(v, dict):
+            continue
+        if not any(m in k for m in _IDEOGRAM_LAYER_MARKERS):
+            continue
+        shape = v.get("shape") or []
+        if len(shape) == 2 and _IDEOGRAM_HIDDEN_SIZE in (int(shape[0]), int(shape[1])):
+            return "ideogram"
     return None
 
 
@@ -222,7 +235,7 @@ def _bfl_quant_of(path):
 # --- Guidance --------------------------------------------------------------------------
 def guidance_schedule(steps, peak=DEFAULT_GUIDANCE):
     """A CONSTANT guidance (MOSS has no per-step schedule); the list form is kept so the
-    callers written for Ideogram's schedule keep working. peak <= 0 -> the official 3.0."""
+    callers that take a per-step list keep working. peak <= 0 -> the official 3.0."""
     n = max(1, int(steps))
     g = float(peak) if peak and float(peak) > 0 else DEFAULT_GUIDANCE
     return [g] * n
@@ -584,8 +597,8 @@ class MossPipe:
             self._pipe.maybe_free_model_hooks()
 
     def _keep_encoder_offload(self):
-        """Should diffusers' own model offload come back on the raw pipeline (a merge from
-        crispz-ideogram, a loader), it is replaced, said once."""
+        """Should diffusers' own model offload come back on the raw pipeline (a loader,
+        a merge from a sibling studio), it is replaced, said once."""
         if self._offload_device is not None and getattr(self._pipe, "_all_hooks", None):
             self._say_once("reoffload", "offload: diffusers' model offload had come back; "
                                         "encoder-only offload reapplied")

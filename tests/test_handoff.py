@@ -23,7 +23,7 @@ FAKE_CZP = textwrap.dedent('''
         inst = {"running": mode == "running", "url": "http://127.0.0.1:7861",
                 "tool": "crispz-flux3"}
         if mode == "clash":
-            inst = {"running": True, "url": "http://127.0.0.1:7860", "tool": "crispz-ideogram"}
+            inst = {"running": True, "url": "http://127.0.0.1:7860", "tool": "crispz-moss"}
         print(json.dumps({"ok": True, "tool": tool, "instance": inst}))
         sys.exit(0)
     spec = json.loads(sys.stdin.read())

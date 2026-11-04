@@ -37,7 +37,7 @@ if [ -z "$ESRGAN_DIR" ]; then
     export ESRGAN_DIR="$(pwd)/upscale_models"
 fi
 
-echo "=== crispz-ideogram - run ==="
+echo "=== crispz-moss - run ==="
 echo "Python     = $RUNPY"
 echo "ESRGAN_DIR = $ESRGAN_DIR"
 [ -n "$CRISPZ_LOG_LEVEL" ] && echo "Log level  = $CRISPZ_LOG_LEVEL  (run.sh --debug)"

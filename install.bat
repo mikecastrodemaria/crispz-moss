@@ -18,13 +18,13 @@ REM pip builds trustmark from an sdist whose setup.py reads a file as cp1252 and
 REM on it ("charmap codec can't decode byte 0x90"); UTF-8 mode fixes it for every build.
 set PYTHONUTF8=1
 
-REM The diffusers symbol expected for this model family. The ONLY line that differs
-REM between crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen),
-REM crispz-klein (FLUX.2) and crispz-ideogram (FLUX.3). FLUX.3 has no pipeline class:
-REM diffusers serves it as a MODULAR block chain, and the distilled auto blocks are
-REM what cz_flux3 builds on (present from diffusers 0.42.1, see requirements.txt).
-set CHECK_MODULE=diffusers.modular_pipelines
-set CHECK_PIPE=Flux3DistilledAutoBlocks
+REM The symbol expected for this model family. The ONLY line that differs between
+REM crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen), crispz-klein
+REM (FLUX.2), crispz-flux3 (FLUX.3) and crispz-moss: MOSS-Image's pipeline is vendored
+REM (third_party\moss_image), what pins the stack is its Qwen3.5-9B text encoder in
+REM transformers (5.21 or later).
+set CHECK_MODULE=transformers
+set CHECK_PIPE=Qwen3_5Model
 
 REM --- flags ---
 set USE_VENV=1
@@ -192,10 +192,10 @@ echo Installing !REMBG_PIN! ^(after Pillow 13: rembg wants pillow^>=12.1, gradio
 if errorlevel 1 echo [WARN] rembg install failed -^> the Remove BG tab stays off.
 echo.
 
-REM 6) Check that diffusers exposes the model family (FLUX.3 modular blocks)
+REM 6) Check that transformers exposes the model family (the Qwen3.5 encoder MOSS-Image reads)
 !RUNPY! -c "from !CHECK_MODULE! import !CHECK_PIPE!; print('!CHECK_PIPE! OK')"
 if errorlevel 1 (
-    echo [ERROR] diffusers does not contain !CHECK_PIPE!.
+    echo [ERROR] transformers does not contain !CHECK_PIPE!.
     exit /b 1
 )
 echo.

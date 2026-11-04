@@ -1,4 +1,4 @@
-"""crispz-ideogram - prompt helpers: styles (Fooocus) + wildcards (__name__).
+"""crispz-moss - prompt helpers: styles (Fooocus) + wildcards (__name__).
 
 Pulled out of app.py. It depends only on cz_core (HERE/CONFIG/_prefs) + the stdlib. The
 UI handlers (the wildcard manager, the style search) stay in app.py.
@@ -154,7 +154,7 @@ def expand_prompt_pair(prompt, negative, seed, index=None):
     Each text has its own random.Random(seed): the same draws for the same seed, and
     changing the positive does not change the negative's draws.
 
-    A JSON caption (Ideogram 4) is passed through untouched: its braces are not variant
+    A layout JSON (MOSS-Image) is passed through untouched: its braces are not variant
     groups and a '|' inside a quoted text would otherwise be read as one."""
     import cz_caption
     if cz_caption.is_caption(prompt):

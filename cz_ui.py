@@ -1,4 +1,4 @@
-"""crispz-ideogram - the Gradio interface (build_ui) + the UI handlers + the shared
+"""crispz-moss - the Gradio interface (build_ui) + the UI handlers + the shared
 orchestration (run / _editor_* / presets / timing) pulled out of app.py (step 8).
 
 This module wires all the cz_* modules together (core/pipeline/esrgan/face/prompt/ollama/
@@ -94,7 +94,7 @@ PRESETS = {
     # ComfyUI Ultimate SD Upscale style settings (x2, 1024 tiles, a low denoise). The
     # presets do NOT touch the offload any more (except Low VRAM): forcing 'none' overrode
     # the 'auto' VRAM test's verdict and froze tight cards (a spill into shared RAM).
-    # crispz-ideogram (lot 7): the steps are the length of the EMULATED img2img schedule,
+    # crispz-moss: the steps are the length of the EMULATED img2img schedule,
     # of which the denoise runs the tail. Measured on the 5090 (03/11/2026, the lot 2
     # poster, x2 + refine at denoise 0.30): 12 steps 35.6 s, 36 steps 54.4 s, images
     # identical to the eye (mean difference 2/255, the texts unchanged at 100 %). The
@@ -1011,7 +1011,7 @@ def _ui_civitai_reco(name, progress=gr.Progress()):
         parts.append(f"CFG={reco['guidance']}")
     if reco.get("sampler"):
         parts.append(f"sampler={reco['sampler']}"
-                     + " (not applied: Ideogram 4 runs its own flow-matching schedule)")
+                     + " (not applied: MOSS-Image runs its own flow-matching schedule)")
     if reco.get("size"):
         parts.append(f"size={reco['size']} (info only)")
     msg = (f"📊 CivitAI consensus ({reco.get('n', '?')} community image(s)): "
@@ -2298,7 +2298,7 @@ def _vram_hint(e):
         return ""
     return ("  \n**VRAM full**, even after clearing the cache: close the other GPU apps "
             "(ComfyUI...), lower Image number, the upscale factor or the number of "
-            "references. If the next render fails too, restart crispz-ideogram.")
+            "references. If the next render fails too, restart crispz-moss.")
 
 
 def _with_live_preview(fn):
@@ -2589,7 +2589,7 @@ def _ui_generate(prompt, negative, styles, style_random, use_input, input_image,
                     if "CUDA" in str(e) or "out of memory" in str(e).lower():
                         msg += ("  \n**VRAM full** (another GPU app like ComfyUI still loaded? "
                                 "spill -> Windows TDR timeout). Close the other GPU apps, **restart "
-                                "crispz-ideogram** (the CUDA context is dead), lower refine_tile / factor.")
+                                "crispz-moss** (the CUDA context is dead), lower refine_tile / factor.")
                     # The images already produced stay displayed/saved.
                     return _done(images, "  \n".join(reports + [msg]), img_paths)
                 images.append(last_result)
@@ -4038,7 +4038,7 @@ def _preset_ckpt_refusal(ckpt, data):
         # No base of THIS build loads it: the width (3072) would otherwise point at the
         # FLUX.3 distilled repo, a wrong direction said with confidence.
         action = ("**This preset names a FLUX.2 Klein checkpoint, which runs in "
-                  "crispz-klein, not here: pick an Ideogram 4 model above, then hit "
+                  "crispz-klein, not here: pick a MOSS-Image model above, then hit "
                   "_Update selected_ to repair the preset.**")
     elif target and target in ZIMAGE_BASE_REPOS and target != cz_pipeline.BASE_REPO:
         action = (f"**Pick `{target}` in the model dropdown above, then "
@@ -4193,7 +4193,7 @@ def build_ui():
             _sample_urls[n] = "/gradio_api/file=" + os.path.abspath(p).replace("\\", "/")
     js_full = CZ_JS.replace("__MAP__", json.dumps(_sample_urls))
     # Omni (multi-reference) is only offered when an Omni/Edit model is configured.
-    # crispz-ideogram: Ideogram 4 has no edit pipeline (cz_protocol.OMNI_SUPPORTED is
+    # crispz-moss: MOSS-Image has no edit pipeline (cz_protocol.OMNI_SUPPORTED is
     # False), whatever OMNI_MODEL says (the FLUX.3 code sets it to the base repo): the
     # Edit (references) tab and input mode stay hidden. Editing: the Edit in crispz-flux3
     # tab (lot 5).
@@ -4315,7 +4315,7 @@ def build_ui():
                     improve_neg_dir_btn = gr.Button("✎", scale=0, min_width=44,
                                                     visible=IMPROVE_ENABLED and IMPROVE_NEGATIVE_UI,
                                                     elem_id="cz_improve_neg_dir")
-                # crispz-ideogram lot 2: the JSON caption editor (presets, magic prompt,
+                # The layout editor (presets, magic prompt, Describe,
                 # boxes drawn with the mouse). Wired further down, once width/height exist.
                 import cz_caption_ui
                 caption_panel = cz_caption_ui.build_panel()
@@ -4419,7 +4419,7 @@ def build_ui():
                         info="Edit (references) = FLUX.3 edits from the images of the Edit tab, cited in the prompt as `<ref_image_0>`, `<ref_image_1>`... (no tag needed with a single image)")
                     with gr.Tabs():
                         with gr.Tab("Upscale or img2img"):
-                            gr.Markdown("*Ideogram 4 has no native img2img or inpaint: crispz-ideogram EMULATES them (SDEdit on the tail of its own schedule; latent blending under the mask). Denoise = the fraction of the steps that runs.*")
+                            gr.Markdown("*MOSS-Image has no native img2img or inpaint: crispz-moss EMULATES them (SDEdit on the tail of its own schedule; latent blending under the mask). Denoise = the fraction of the steps that runs.*")
                             with gr.Row():
                                 inp = _crop_input("Drop image here / click to upload", 300)
                                 with gr.Column():
@@ -4481,7 +4481,7 @@ def build_ui():
                         with gr.Tab("Vision Mix"):
                             gr.Markdown("*Vision Mix: a vision model looks at your reference images "
                                         "and an LLM blends them into ONE text prompt (e.g. a person + "
-                                        "an outfit + a setting), then Ideogram 4 generates from it. "
+                                        "an outfit + a setting), then MOSS-Image generates from it. "
                                         "Needs Ollama with a vision model (Advanced > Prompt AI). "
                                         "It mixes ideas/style, not exact pixels.*")
                             with gr.Row():
@@ -4508,11 +4508,11 @@ def build_ui():
                         with gr.Tab("Edit in crispz-flux3"):
                             import cz_handoff
                             _ho_ok, _ho_why = cz_handoff.status()
-                            gr.Markdown("*Ideogram 4 does not edit. This sends the image and "
+                            gr.Markdown("*MOSS-Image does not edit. This sends the image and "
                                         "the instruction to **crispz-flux3** on this "
                                         "machine (protocol v1): through its app when it "
                                         "runs, otherwise in its own process after "
-                                        "crispz-ideogram frees its VRAM. Nothing leaves "
+                                        "crispz-moss frees its VRAM. Nothing leaves "
                                         "the machine. Up to 3 references.*")
                             with gr.Row():
                                 ho_dir = gr.Textbox(value=cz_handoff.flux3_dir(),
@@ -4557,7 +4557,7 @@ def build_ui():
                             vec_status = gr.Markdown("")
 
                         with gr.Tab("Inpaint / Outpaint"):
-                            gr.Markdown("*Ideogram 4 has no native img2img or inpaint: crispz-ideogram EMULATES them (SDEdit on the tail of its own schedule; latent blending under the mask). Denoise = the fraction of the steps that runs.*")
+                            gr.Markdown("*MOSS-Image has no native img2img or inpaint: crispz-moss EMULATES them (SDEdit on the tail of its own schedule; latent blending under the mask). Denoise = the fraction of the steps that runs.*")
                             gr.Markdown("*One editor for everything: **Brush** = inpaint the painted "
                                         "area · **Expand sides** = outpaint Left/Right/Top/Bottom "
                                         "(inpaint blend) · "
@@ -4565,7 +4565,7 @@ def build_ui():
                                         "(Performance). Describe the result in the prompt.*")
                             edit_mode = gr.Radio(
                                 # "Expand sides (outpaint LoRA)" is FLUX.3's Outpaint LoRA:
-                                # the LoRA family guard refuses it on Ideogram 4, so the
+                                # the LoRA family guard refuses it on MOSS-Image, so the
                                 # mode is not offered (its handler stays, for merges).
                                 ["Brush (inpaint)", "Expand sides (outpaint)",
                                  "Reframe (ratio)"],
@@ -4780,14 +4780,14 @@ def build_ui():
                                                # outside choices is refused by the frontend.
                                                value=_valid_performance(CONFIG.get("default_performance")),
                                                label="Performance",
-                                               info="Sets steps and guidance. Ideogram = the official "
-                                                    "48 steps, guidance schedule peaking at 7.0. Draft = 24 "
-                                                    "steps, a quick look.")
+                                               info="Sets steps and guidance. MOSS = the official "
+                                                    "50 steps at CFG 3.0. Draft = fewer steps, a quick "
+                                                    "look (the texts hold, details may move).")
                         aspect = gr.Dropdown(list(ASPECT_RATIOS),
                                              value=CONFIG.get("default_aspect_ratio", "1024 x 1024  (1:1)"),
                                              label="Aspect ratio",
-                                             info="1 MP formats first, then 2K (Ideogram 4 is "
-                                                  "native at 2048x2048). Width / Height below take any "
+                                             info="1 MP formats first, then 2K (MOSS-Image is "
+                                                  "validated from 1 to 2 Mpx). Width / Height below take any "
                                                   "custom size, a multiple of 16, 256 to 2048 a side, "
                                                   "ratio up to 6:1.")
                         force_ratio_cb = gr.Radio(
@@ -4812,9 +4812,9 @@ def build_ui():
                         with gr.Row():
                             guidance = gr.Slider(0.0, 10.0, value=float(CONFIG.get("default_guidance", 7.0)),
                                                  step=0.5, label="CFG guidance", scale=2,
-                                                 info="The PEAK of Ideogram 4's per-step guidance "
-                                                      "schedule (official: 7.0, then 3.0 on the last "
-                                                      "steps; the shape is kept at any step count).")
+                                                 info="Classifier-free guidance (MOSS-Image: 3.0 "
+                                                      "official, 3 to 6 advised; 1.0 = no negative "
+                                                      "branch, twice as fast).")
                             # FLUX.3 runs its own FlowMatch Euler schedule (constant shift
                             # 6.93); the distilled checkpoint is a flow map that is told the
                             # next timestep at every step, so another sampler or a remapped
@@ -4824,13 +4824,13 @@ def build_ui():
                             sampler_dd = gr.Dropdown(
                                 list(SAMPLER_CHOICES), value="euler", interactive=False,
                                 label="Sampler", scale=1,
-                                info="Not used on Ideogram 4: the model runs its own "
-                                     "flow-matching sampler. Other choices are ignored.")
+                                info="Not used on MOSS-Image: the model runs its own "
+                                     "flow-matching Euler sampler. Other choices are ignored.")
                             schedule_dd = gr.Dropdown(
                                 list(SCHEDULE_CHOICES), value="sgm_uniform", interactive=False,
                                 label="Schedule", scale=1,
-                                info="Not used on Ideogram 4: its own logit-normal schedule "
-                                     "(48 steps, per-step guidance). Other choices are ignored.")
+                                info="Not used on MOSS-Image: its own shifted schedule, "
+                                     "snapped to the training grid. Other choices are ignored.")
                         # set_sampler/set_schedule return a status: it is DISPLAYED
                         # instead of thrown away (otherwise Gradio warns "returned too many
                         # output values").
@@ -4924,11 +4924,12 @@ def build_ui():
                                 "weights stay BF16, they just shuttle between RAM and GPU.\n\n"
                                 "- **auto** (default): at model load, measures the *free* VRAM (all processes "
                                 "counted) and picks `none` only when the model + activations provably fit; "
-                                "otherwise `model`/`sequential`. Ideogram 4 (nf4) is about 15 GB of weights; under "
-                                "40 GB of VRAM `auto` picks crispz-ideogram's own `model` offload, which "
-                                "keeps the two transformers and the VAE on the card and moves only the "
-                                "text encoder (9.9 GB resident, 19 GB peak at 1024, 23.4 GB at 2048 on "
-                                "an RTX 5090). The verdict is cached per GPU + model "
+                                "otherwise `model`/`sequential`. MOSS-Image is 10 GB of DiT plus a 17 GB text "
+                                "encoder (bf16); under 40 GB of VRAM `auto` picks crispz-moss's own `model` "
+                                "offload, which keeps the DiT and the VAE on the card and moves only the "
+                                "text encoder (9.7 GB resident, 15 GB peak at 1024 once the prompt is "
+                                "cached, 27 GB while a new prompt is encoded, on an RTX 5090; the nf4 "
+                                "encoder stays resident at 21 GB flat). The verdict is cached per GPU + model "
                                 "(cache/hw_profile.json): use **Re-test VRAM** after closing/opening another "
                                 "GPU app.\n"
                                 "- **none**: everything stays in VRAM. **Fastest.** Use it when you have enough "
@@ -4947,10 +4948,10 @@ def build_ui():
                             ckpt_extra_dir_tb = gr.Textbox(
                                 value=cz_pipeline.CHECKPOINTS_EXTRA_DIR,
                                 label="Extra checkpoints folder (optional)",
-                                placeholder="e.g. D:\\models\\Ideogram",
-                                info="Merged into the checkpoint list above. Single-file Ideogram 4 transformers "
-                                     "(ComfyUI fp8 / int8 / nvfp4) are skipped and logged: diffusers "
-                                     "has no converter for them. Leave empty to disable.")
+                                placeholder="e.g. D:\\models\\MOSS",
+                                info="Merged into the checkpoint list above. Single-file MOSS-Image DiTs "
+                                     "in the ComfyUI / CivitAI layout (bf16, fp8, int8 ConvRot) load; "
+                                     "the 4-bit builds are refused with the reason. Leave empty to disable.")
                             esrgan_dir_tb = gr.Textbox(value=cz_esrgan.ESRGAN_DIR,
                                                        label="ESRGAN_DIR (.pth/.safetensors folder)")
                             with gr.Row():
@@ -4994,25 +4995,23 @@ def build_ui():
                                 transformer_tb = gr.Textbox(
                                     value="", scale=3,
                                     label="Transformer override (HF repo / diffusers folder)",
-                                    placeholder="HF repo or folder with an Ideogram 4 transformer",
+                                    placeholder="HF repo or folder with a MOSS-Image transformer",
                                     info="For community models with an incomplete tokenizer: "
                                          "loads only the transformer, keeps base VAE/encoder.")
                                 with gr.Row():
                                     transformer_apply_btn = gr.Button("Apply override", size="sm",
                                                                       variant="secondary")
                             with gr.Column():
-                                # Not supported on FLUX.3 (0.1): the model reads 8 hidden
-                                # states of its own Qwen3-VL-4B and nothing else fits that
-                                # slot yet. The control stays, greyed out, so a preference
-                                # from crispz-klein is shown rather than lost; cz_pipeline
-                                # announces at load time that it is not applied.
+                                # MOSS-Image reads the last hidden state of a Qwen3.5-9B: a
+                                # replacement of that size loads (a transformers repo or
+                                # folder, or a single ComfyUI / CivitAI file in bf16 or int8
+                                # ConvRot); cz_pipeline refuses another size by name.
                                 te_dd = gr.Dropdown(
                                     choices=_te_choices(), value=cz_pipeline.TEXT_ENCODER or "",
                                     allow_custom_value=True, label="Text encoder",
-                                    interactive=False,
-                                    info="Not available on Ideogram 4: the model reads 13 hidden "
-                                         "states of its own Qwen3-VL-8B and no replacement fits. "
-                                         "A value set in config/preferences is kept but not applied.")
+                                    info="A Qwen3.5-9B replacement (a finetune, a repack): a "
+                                         "transformers repo / folder, or a single ComfyUI / CivitAI "
+                                         "file (bf16, int8 ConvRot). Default = the base repo's own.")
                                 with gr.Row():
                                     te_refresh_btn = gr.Button("Refresh encoders", size="sm", scale=1)
                                 te_status = gr.Markdown(_te_hint())
@@ -5073,8 +5072,8 @@ def build_ui():
                             with gr.Accordion("\U0001F50E Search CivitAI (download a LoRA)",
                                               open=False):
                                 gr.Markdown(
-                                    "*Search a LoRA by name on CivitAI. Ideogram versions come "
-                                    "first (FLUX LoRAs do not load here). Download "
+                                    "*Search a LoRA by name on CivitAI. MOSS-Image versions come "
+                                    "first (FLUX and Ideogram LoRAs do not load here). Download "
                                     "goes to the LoRA folder, with a SHA256 check + "
                                     "preview/trigger words fetched.*")
                                 with gr.Row():
@@ -5336,6 +5335,7 @@ def build_ui():
         ckpt_dd.change(_apply_checkpoint, [ckpt_dd],
                        [ckpt_status, gen_steps, guidance, performance, ckpt_dd, preset_dd]) \
             .then(_ui_refresh_text_encoders, None, [te_dd, te_status])
+        te_dd.change(_ui_set_text_encoder, [te_dd], [te_status])
         # The same six outputs as the menu: the selector does the same base swap,
         # and the menu is one of them -- it has to be refilled with the other
         # family's models.

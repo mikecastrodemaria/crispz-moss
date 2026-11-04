@@ -15,11 +15,13 @@
 set -e
 cd "$(dirname "$0")"
 
-# The pipeline expected for this model family. The ONLY line that differs between
-# crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen)
-# and crispz-ideogram (FLUX.2).
-CHECK_MODULE=diffusers.modular_pipelines
-CHECK_PIPE=Flux3DistilledAutoBlocks
+# The symbol expected for this model family. The ONLY line that differs between
+# crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen), crispz-klein
+# (FLUX.2), crispz-flux3 (FLUX.3) and crispz-moss: MOSS-Image's pipeline is vendored
+# (third_party/moss_image), what pins the stack is its Qwen3.5-9B text encoder in
+# transformers (5.21 or later).
+CHECK_MODULE=transformers
+CHECK_PIPE=Qwen3_5Model
 
 USE_VENV=1
 ISOLATED=1
@@ -175,7 +177,7 @@ $RUNPY -m pip install "$REMBG_PIN" \
     || echo "[WARN] rembg install failed -> the Remove BG tab stays off."
 echo
 
-# 6) Check that diffusers exposes the model family (FLUX.3 modular blocks)
+# 6) Check that transformers exposes the model family (the Qwen3.5 encoder MOSS-Image reads)
 $RUNPY -c "from $CHECK_MODULE import $CHECK_PIPE; print('$CHECK_PIPE OK')"
 echo
 

@@ -7,8 +7,8 @@ MOSS port (crispz-moss 0.1): the model is loaded by cz_moss.load(). MOSS-Image i
 to image; img2img, inpaint, outpaint, reframe, refine and the detailer run through the
 adapter's EMULATED img2img / inpaint (lot 3: SDEdit on the tail of the native schedule,
 latent blending under the mask). Editing with references is not available (the adapter
-raises a NAMED NotImplementedError and points at crispz-flux3). FLUX.3 and Ideogram code
-paths are kept, unreached, to merge fixes from the sibling studios with few conflicts.
+raises a NAMED NotImplementedError and points at crispz-flux3). The FLUX.3 code path is
+kept, unreached, to merge fixes from the sibling studios with few conflicts.
 
 --- crispz-flux3's notes ---
 
@@ -25,7 +25,7 @@ Fork of crispz-qwen-edit (Qwen-Image). Mapping:
   - inpaint / reframe        -> Flux2KleinInpaintPipeline
   - img2img (refine/upscale) -> Flux2KleinInpaintPipeline + a full WHITE mask
                                 (the base pipeline does NOT expose `strength`)
-  (crispz-ideogram: all four are the ONE cz_flux3.Flux3Pipe; get_pipe hands the base back
+  (crispz-moss: all four are the ONE cz_moss.MossPipe; get_pipe hands the base back
   under every kind, and `strength` / `mask_image` are honoured by the adapter itself)
 
 klein-4B is DISTILLED (`is_distilled: true`). Measured on 2026-09-05 (tests/
@@ -66,7 +66,6 @@ from cz_core import (
 )
 
 import cz_flux3  # noqa: F401  (family markers; img2img / inpaint helpers for lot 3)
-import cz_ideogram  # noqa: F401  (family markers of the Ideogram files a shared folder may hold)
 import cz_moss as engine
 
 # The base MOSS-Image model (text to image). Overridden through env MOSS_MODEL or
@@ -183,7 +182,7 @@ def _file_variant(path):
 def _variant_repo_for(variant):
     """The official repo whose config matches `variant`, keeping a local or mirror base
     repo when it already is of that variant."""
-    # One Ideogram 4 checkpoint: whatever the variant asked, the base repo answers.
+    # One MOSS-Image base repo: whatever the variant asked, the base repo answers.
     return BASE_REPO if engine.is_engine_repo(BASE_REPO) else engine.DEFAULT_REPO
 
 # Replacement text encoder (Models > Checkpoints > Text encoder). Empty = the one from
@@ -537,7 +536,7 @@ def _cfg(negative=None, guidance=None):
 # Encoding a prompt sends the text encoder through the GPU. Under 'model' offload that
 # transfer is paid on EVERY pipeline call -- including the detailer's passes, which
 # redo the SAME prompt once per face and per hand.
-# Measured on crispz-ideogram (9B GGUF, model offload): prompt+setup 5.2-6.1 s per pass
+# Measured on crispz-flux3 (9B GGUF, model offload): prompt+setup 5.2-6.1 s per pass
 # without the cache against 1.7-1.8 s with it, for 0.3 s of diffusion. 2.1x per hand.
 # Without offload the win drops to ~8 % (the encoder is already resident, nothing to
 # move).
@@ -617,7 +616,7 @@ def _fresh(pipe, kind="txt2img"):
 
 
 def _qwen_call(pipe, **kw):
-    """Calls the pipeline (a cz_flux3.Flux3Pipe in crispz-ideogram), absorbing the API gaps
+    """Calls the pipeline (a cz_moss.MossPipe here), absorbing the API gaps
     with upstream: the guidance policy (distilled = 1.0, base = the slider), the prompt
     embedding cache, the stray CFG kwargs. The Flux3Pipe takes `strength` and `mask_image`
     itself, so the white-mask trick below is never needed on it.
@@ -1067,7 +1066,7 @@ def set_zimage_model(repo_or_path):
     # not been accepted yet therefore left a None stuck for the whole session: the width
     # filter stayed off even after accepting the licence, until a restart. Choosing that
     # repo counts as "retry", so its entry is purged -- the CURRENT repo chosen again
-    # too (crispz-ideogram has one base repo: re-choosing it is the only retry there is).
+    # too (crispz-moss has one base repo: re-choosing it is the only retry there is).
     _BASE_DIM_CACHE.pop(repo_or_path, None)
     if repo_or_path != BASE_REPO:
         # The base repo changes: the VAE/encoder/tokenizer change too -> a full reload.
@@ -1397,7 +1396,7 @@ _FLUX2_DIM_SIGS = (("double_stream_modulation_img.lin.weight", 6),
                    ("double_stream_modulation_txt.lin.weight", 6),
                    ("single_stream_modulation.lin.weight", 3),
                    ("single_stream_modulation.linear.weight", 3))
-# crispz-ideogram: ONE width. FLUX.3 Image Klein is 3072 wide, exactly like FLUX.2-klein-4B;
+# crispz-moss: ONE width. FLUX.3 Image Klein is 3072 wide, exactly like FLUX.2-klein-4B;
 # the 4096 lane is FLUX.2-klein-9B and nothing else. So the width tells FLUX.3 and the 4B
 # apart from NOTHING: the family is read from the tensor names first (_file_family,
 # _flux3_file_refusal), and the width only serves to NAME a 9B file in a message.
@@ -1767,7 +1766,7 @@ def _safetensors_unsupported(path):
         error, at worst a flat image.
     ComfyUI-style 'scaled' FP8 / INT8 are NO LONGER rejected: they go through the dequant
     loader (_safetensors_dequant + _load_dequant_state_dict).
-    crispz-ideogram: the FAMILY is checked first (tensor names), the width no longer is: a
+    crispz-moss: the FAMILY is checked first (tensor names), the width no longer is: a
     FLUX.2-klein-4B file is as wide as FLUX.3 and would pass a width check.
 """
     bad = _family_refusal(path)
@@ -2348,7 +2347,7 @@ def _gguf_layout(path):
         names = [t.name for t in GGUFReader(path).tensors]
         if not names:
             return "unknown"
-        # crispz-ideogram: a FLUX.3 file is told by its block names (the same reading as
+        # crispz-moss: a FLUX.3 file is told by its block names (the same reading as
         # the .safetensors family guard), whatever 'general.architecture' says.
         fam = engine.family_from_keys(names)
         if fam in (engine.FAMILY, "flux3"):
@@ -2417,7 +2416,7 @@ def _walk_checkpoints(d):
     return sorted(out)
 
 
-# --- crispz-ideogram: which single files are FLUX.3 transformers -----------------------
+# --- crispz-moss: which single files are FLUX.3 transformers ---------------------------
 # crispz-klein sorted single files by HIDDEN SIZE (3072 = 4B, 4096 = 9B). That test is
 # blind here: FLUX.3 Image Klein is ALSO 3072 wide, so a FLUX.2-klein-4B checkpoint
 # would pass it and die gigabytes later in load_state_dict. The family is read from the
@@ -3253,58 +3252,13 @@ def _latent_rgb_on(device, dtype):
     return hit
 
 
-# Ideogram 4 uses the very same VAE as FLUX.2 (every weight identical, bn statistics
-# included, checked on 2026-10-31) but packs its tokens differently: (p, p, c) where FLUX.2
-# packs (c, p, p), i.e. token channel j = (2*p1 + p2) * 32 + c instead of c * 4 + (2*p1 + p2).
-# Worse, it normalizes each token position with the bn statistics AS STORED, which are
-# indexed in the FLUX order: position j gets the mean/std of FLUX channel j, not of its
-# own channel. So a permutation alone is not enough; each input also needs an affine
-# correction. Both fold into the matrix, so the preview stays one matmul:
-#   flux_n[f(j)] = a_j * ideo_n[j] + c_j, with f(j) = c*4 + p, a_j = s[j] / s[f(j)],
-#   c_j = (m[j] - m[f(j)]) / s[f(j)]
-#   -> M_ideo[j] = a_j * M[f(j)],  b_ideo = b + sum_j c_j * M[f(j)]
-# Measured on the real VAE (CPU, 3 sample images, 512 px): mean error 52-61 / 255 with the
-# FLUX matrix applied as is, against 13-24 for FLUX itself; the folded matrix gives back
-# exactly the FLUX figures (tests/test_latent_preview.py pins the algebra).
-_IDEOGRAM_PROJ_CACHE = {}
-
-
-def _ideogram_preview_proj(vae):
-    """(M, b) for Ideogram's packed latents, derived from the loaded VAE's bn statistics.
-
-    Cached per VAE object: computed once at the first preview step, a few microseconds."""
-    key = id(vae)
-    hit = _IDEOGRAM_PROJ_CACHE.get(key)
-    if hit is not None and hit[0] is vae:
-        return hit[1]
-    bn = vae.bn
-    m = bn.running_mean.detach().float().cpu()
-    s = torch.sqrt(bn.running_var.detach().float().cpu() + float(vae.config.batch_norm_eps))
-    n = m.numel()
-    ch = n // 4                                   # ae channels, patch 2x2
-    j = torch.arange(n)
-    f = (j % ch) * 4 + j // ch
-    mat = torch.tensor(_LATENT_RGB, dtype=torch.float32)
-    bias = torch.tensor(_LATENT_RGB_BIAS, dtype=torch.float32)
-    a = s / s[f]
-    c = (m - m[f]) / s[f]
-    proj = (a[:, None] * mat[f], bias + (c[:, None] * mat[f]).sum(0))
-    _IDEOGRAM_PROJ_CACHE[key] = (vae, proj)
-    return proj
-
-
+# MOSS-Image packs its tokens in the FLUX order (c, p, p) and normalizes them with the
+# bn statistics of their own channel: the FLUX.2 matrix applies as is. `proj` stays on
+# latent_preview_image for a family that would pack differently (none here).
 def _preview_proj_for(pipe):
     """The projection to use for `pipe` (the object the denoise hands its callback):
-    None = the FLUX.2 matrix as is; Ideogram 4 gets the folded one."""
-    pipe = getattr(pipe, "_pipe", pipe)          # cz_ideogram.IdeogramPipe -> the real one
-    if pipe is None or not type(pipe).__name__.startswith("Ideogram4"):
-        return None
-    vae = getattr(pipe, "vae", None)
-    if vae is None or getattr(vae, "bn", None) is None:
-        return None
-    if vae.bn.running_mean.numel() != len(_LATENT_RGB):
-        return None
-    return _ideogram_preview_proj(vae)
+    None = the FLUX.2 matrix as is, which is MOSS-Image's case."""
+    return None
 
 
 def latent_preview_image(latents, width=0, height=0, proj=None):
@@ -3314,7 +3268,7 @@ def latent_preview_image(latents, width=0, height=0, proj=None):
     only the HxWx3 uint8 result crosses back, so the denoise is not stalled by a transfer.
     The grid comes from the asked resolution: a packed token is a 16x16 block of pixels.
     None when the two do not agree -- better no preview than a scrambled one.
-    `proj` = (M, b) replaces the FLUX.2 matrix (Ideogram 4, see _ideogram_preview_proj)."""
+    `proj` = (M, b) would replace the FLUX.2 matrix for a family that packs otherwise."""
     z = latents[0].detach().float()
     if z.dim() == 3 and z.shape[0] == len(_LATENT_RGB):
         # MOSS-Image hands its latents as (B, 128, h, w): the same 128 bn-normalized
@@ -3534,7 +3488,7 @@ def restore_offload(pipe, why=""):
         else:
             pipe.to(DEVICE)
     except Exception as e:
-        _log(f"pipeline left on the CPU and NOT restored ({e}): restart crispz-ideogram")
+        _log(f"pipeline left on the CPU and NOT restored ({e}): restart crispz-moss")
         return False
     _log(f"pipeline was left on the CPU{' after ' + why if why else ''} -> offload "
          f"'{off}' restored in place (no reload)")
@@ -3944,7 +3898,7 @@ def _load_transformer(path=None, base=None):
             if odd:
                 raise RuntimeError(
                     f"{os.path.basename(path)}: comfy-quant '{odd[0]}' build (6-bit or "
-                    f"packed weights, group scales). crispz-ideogram dequantizes the INT8 and "
+                    f"packed weights, group scales). crispz-moss dequantizes the INT8 and "
                     f"FP8 'scaled' builds only: take the INT8, bf16 or GGUF file of the "
                     f"same page, or BFL's fp8r / nvfp4 variant (Precision selector).")
             dq = _safetensors_dequant(path)
@@ -5310,7 +5264,7 @@ def _refine_whole(pipe, image, denoise, steps, prompt, seed):
             return out
         pipe = None                  # see generate(). The CALLER may still hold the
                                      # pipe: free_vram releases the wrapper's weights
-                                     # anyway (IdeogramPipe.release), lot 7
+                                     # anyway (MossPipe.release)
         _consume_vram_downgrade()
         pipe = get_pipe("img2img")   # reload with the downgraded offload
     return out

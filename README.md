@@ -1,155 +1,137 @@
 # crispz-moss
 
-> **Work in progress (lot 1 of 6, 2026-11-03).** crispz-moss is crispz-ideogram ported to
-> **MOSS-Image** (OpenMOSS, Apache 2.0: commercial use allowed). The engine, the single-file
-> loaders (ComfyUI / CivitAI) and the tests are in; the GPU measurements, the layout JSON
-> editor and the rest of this README follow lot by lot. The specification is `CLAUDE.md`;
-> below this banner the README still describes crispz-ideogram.
-
-# crispz-ideogram (the base this fork starts from)
-
-The **Ideogram 4.0** studio of the crispz family: text in images and design (posters,
+The **MOSS-Image** studio of the crispz family: text in images and design (posters,
 logos, packaging, slides, covers, dense typography), Fooocus-style, **100% local**.
-Ideogram 4 is the open-weights model that renders text best; the other crispz studios
-stay better at photos and editing.
+MOSS-Image (OpenMOSS, Fudan, October 2026) is a 5B open-weights model under **Apache
+2.0**: commercial use allowed. Measured against Ideogram 4 on the same posters (24
+renders), it rendered every requested text exactly, faster, and with no licence strings
+attached. The other crispz studios stay better at photos and editing.
+
+> **Work in progress (0.1.0-dev, 2026-11-04).** Lots 1 to 3 of 6 are in: the engine,
+> the single-file loaders, the layout editor, the magic prompt, Describe, and the
+> emulated img2img / inpaint / outpaint. LoRAs (lot 4), the local tools (lot 5) and the
+> release (lot 6) follow. The specification and the work log are in `CLAUDE.md`.
 
 ## Licence: read this first
 
-- **The model.** Ideogram 4.0's weights are under the **Ideogram 4 Non-Commercial
-  licence**: personal use and research only. **Any commercial use of the self-hosted
-  weights needs a licence negotiated with Ideogram.** No client deliverable made locally
-  with this model without that licence. The licence also forbids circumventing or
-  disabling the model's safety filter (built into the weights: a blocked image comes out
-  as a grey card).
+- **The model.** MOSS-Image's weights and pipeline code are **Apache 2.0** (OpenMOSS).
+  Its text encoder is Qwen3.5-9B (Apache 2.0) and its VAE is FLUX.2 klein's (Apache 2.0,
+  to confirm on the black-forest-labs repo at release). Commercial use is allowed:
+  client deliverables made locally are fine. Community LoRAs each carry their own
+  licence, read before any client use.
 - **This app's code** is under CC BY-NC 4.0 (see [LICENSE.txt](LICENSE.txt)).
-- Images made through the optional Ideogram cloud API follow the API's own terms, not
-  the licence above (see *Local and cloud*).
+- **Nothing leaves the machine.** There is no cloud function at all. Ollama, when used,
+  is a local server (its URL is logged at every call).
 
 ## What it does
 
 | | |
 |---|---|
-| **Generate** | Ideogram 4.0 text to image, 48 steps, the official per-step guidance schedule (the slider sets its peak, 7 by default), up to 2048x2048, ratios up to 6:1 |
-| **JSON captions** | Ideogram 4 was trained on structured captions: an editor builds them (summary, style, palette, every text with its exact content and its box), boxes drawn with the mouse on a canvas at the chosen ratio, raw JSON mode |
+| **Generate** | MOSS-Image text to image, 50 steps, CFG 3.0 (official settings), a real negative prompt, 256 to 2048 a side, validated from 1 to 2 Mpx |
+| **Layout JSON** | MOSS-Image reads structured layouts: an editor builds them (summary, meta, palette, every text with its exact content and its box), boxes drawn with the mouse on a canvas at the chosen ratio, raw JSON mode. A layout is the guarantee "nothing but these words" |
 | **Design presets** | poster (A series), logo, business card, book cover, slide 16:9, packaging, YouTube thumbnail, story 9:16, banner 6:1, each at its native size |
-| **Magic prompt** | a plain idea into a JSON caption, locally (Qwen3-VL-8B, the model's own text encoder, constrained by outlines) or through Ollama |
-| **Describe** | an image into a JSON caption, locally (Qwen3-VL-8B reads the texts verbatim and places the boxes) |
-| **img2img, inpaint, outpaint, reframe** | **emulated**: Ideogram 4 has no native pipeline for them. SDEdit on the tail of its own schedule, latent blending under the mask |
+| **Magic prompt** | a plain idea into a layout, through Ollama (a local LLM, seconds) or locally with the model's own Qwen3.5-9B encoder and its LM head (about a minute) |
+| **Describe** | an image into a layout: through an Ollama vision model, or locally with the Qwen3.5-9B encoder (its vision tower reads the texts verbatim and places the boxes) |
+| **img2img, inpaint, outpaint, reframe** | **emulated**: MOSS-Image has no native pipeline for them. SDEdit on the tail of its own schedule, latent blending under the mask |
 | **Upscale** | ESRGAN + diffusion refine, tiled |
+| **Single files** | ComfyUI / CivitAI DiTs (bf16, fp8, int8 ConvRot) and Qwen3.5 encoders (bf16, int8 ConvRot) load; the 4-bit builds are refused with the reason |
 | **Vectorize (SVG)** | locally with vtracer: made for logos, icons and flat colours |
 | **Remove BG** | locally with rembg |
 | **Edit with references** | handed to **crispz-flux3** on the same machine (see below) |
-| **The rest of the family** | styles, wildcards, LoRAs (Ideogram 4 ones only), X/Y/Z grids, job queue, Asset Browser, CivitAI search, face swap, detailer, CLI and the family protocol v1 (`czp`) |
-
-There is **no negative prompt**: Ideogram 4's unconditional branch takes no text, so the
-field is greyed out and says why.
+| **The rest of the family** | styles, wildcards, X/Y/Z grids, job queue, Asset Browser, CivitAI search, face swap, detailer, CLI and the family protocol v1 (`czp`) |
 
 ## Requirements
 
-- An **NVIDIA GPU** with CUDA: the nf4 weights load through bitsandbytes, CUDA only.
-- **24 GB of VRAM** is comfortable up to 2048x2048 (32 GB measured below). The `auto`
-  offload keeps the two transformers and the VAE on the card and moves only the text
-  encoder when the card has under 40 GB.
+- An **NVIDIA GPU** with CUDA. The DiT is 10 GB in bf16, the text encoder 17 GB in bf16
+  (or about 6 GB in nf4 through bitsandbytes), the VAE 0.25 GB.
+- **32 GB of VRAM** measured below with the `auto` offload: the DiT and the VAE stay on
+  the card, the encoder comes in for each new prompt. With less VRAM, the nf4 encoder
+  (`moss_precision`) keeps everything resident at 21 GB flat; `sequential` goes lower.
+- About 48 GB of system RAM is comfortable (the bf16 encoder waits there between
+  prompts); the nf4 encoder removes that need.
 - Python 3.11 or later (3.13 advised), Windows or Linux.
 
 ## Install
 
-Windows: `install.bat`, then `run.bat`. Linux: `install.sh`, then `run.sh`. Or the
-Pinokio launcher: [crispz-ideogram.pinokio](https://github.com/mikecastrodemaria/crispz-ideogram.pinokio).
+Windows: `install.bat`, then `run.bat`. Linux: `install.sh`, then `run.sh`.
 
 Do **not** run `pip install -r requirements.txt` in the installed `.venv`: gradio 5.50
 declares `pillow<12` and pip would downgrade Pillow 13 (the install scripts handle it).
 To add one dependency, install it alone at its locked version.
 
-### Before the first render: the licence and the token
+The first render downloads about 27 GB (`OpenMOSS-Team/MOSS-Image-SFT`, public, no
+token), 25 to 30 s to load from the cache afterwards. The first local magic prompt adds
+a 2 GB LM head; the first Remove BG the 176 MB u2net model.
 
-1. Open https://huggingface.co/ideogram-ai/ideogram-4-nf4-diffusers and accept the
-   licence **on that exact repo** (accepting it on `ideogram-4-nf4` is not enough).
-2. Put a READ token in `config.txt` (`"hf_token": "hf_..."`) or run `hf auth login`.
-
-The first render downloads about 15 GB (two nf4 transformers of 5.2 GB, the Qwen3-VL-8B
-encoder 5.5 GB, the VAE), 20 s to load from the cache afterwards. The first magic prompt
-adds a 1.2 GB head; the first Remove BG the 176 MB u2net model.
-
-**An old `config.txt`** (written by crispz-flux3 or before 0.1.0) keeps its values:
-check `default_model_profile` (48 steps, guidance 7) and the performance preset.
+**An old `config.txt`** (written by another crispz) keeps its values: check
+`default_model_profile` (50 steps, guidance 3.0) and the performance preset.
 
 ## Measured on an RTX 5090
 
-Windows, torch 2.11 cu128, bitsandbytes 0.50.2, nf4, offload `auto` (encoder only),
-48 steps, guidance 7.
+Windows, torch 2.11 cu128, bf16, offload `auto` (encoder only), 50 steps, CFG 3.0.
 
 | | |
 |---|---|
-| Load from the cache | 20 to 23 s |
-| VRAM at rest | 9.9 GB allocated |
-| 1024x1024 | 61 s (1.27 s/step), 19.2 GB peak |
-| 2048x2048 | 394 s (8.2 s/step), 23.4 GB peak, VAE decode 1.1 s |
-| Stop | the partial image comes back 1.4 s after the request |
-| Magic prompt (local) | 10.7 to 18.5 s (44 s the first time: the head and the schema) |
-| Describe (local) | 21.7 s, the poster's texts read back |
-| img2img 720x1024, denoise 0.3 / 0.6 | 29 s (load included) / 26 s |
-| Inpaint, outpaint, reframe (0.7 to 1 Mpx) | 40 s, 57 s, 63 s |
-| Vectorize a logo / a 768 px photo (CPU) | 0.05 s, 3 paths / 3 s, about 2,000 paths |
-| Remove BG (CPU, after the first call) | 1.1 s |
+| Load from the cache | 25 to 30 s |
+| VRAM at rest | 9.7 GB allocated (DiT + VAE) |
+| 1024x1024 | 43 s (0.85 s/step), 15 GB peak once the prompt is cached; 27 GB while a new prompt is encoded (21 GB flat with the nf4 encoder) |
+| 1456x1456 (2 Mpx) | 102 s (2.0 s/step), 15.6 GB peak |
+| 2048x1152 | 116 s (2.3 s/step), 15.7 GB peak |
+| Stop | the partial image comes back 0.8 s after the request |
+| Magic prompt | Ollama 12 to 20 s; local (Qwen3.5-9B + LM head) 77 s |
+| Describe (local) | 76 s, the logo's text read back, boxes on the symbol and the text |
+| img2img 1152x1632, denoise 0.3 / 0.6 | 71 s (first render, cold) / 52 s |
+| Inpaint, outpaint, reframe (work area capped at ~1 Mpx) | 43 s, 44 s, 40 s |
+| Draft, the poster at 12 / 20 / 25 / 50 steps | 25 / 34 / 43 / 85 s, texts exact at every count |
+
+A/B against Ideogram 4 (crispz-ideogram's lot 2 posters, 4 seeds each, plain text and
+layout): 24 renders out of 24 with every requested text exact, small fixed texts
+included, no banding; the bakery poster in 25 s against 56 s.
 
 ## Getting good text
 
-- **Use JSON captions.** Plain text works, but the model was trained on JSON: put every
-  text in its own element with its exact content and a box. Start from a design preset
-  or the magic prompt, then fix the texts in the editor.
-- **The safety filter has false positives** on plain-text prompts (a grey "blocked"
-  card on a harmless poster). Measured: 1 blocked card out of 2 in plain text, 0 out of
-  2 with the same ideas in JSON. Rewording or a JSON caption is the fix; the filter
-  itself is part of the weights and of the licence.
+- **Use layouts.** Plain text works, but in plain text the model sometimes adds words it
+  infers from the brief (a misspelt "COFFEE SHOP" on a coffee logo). With a layout,
+  where every text is listed with its box, it never did. Start from a design preset or
+  the magic prompt, then fix the texts in the editor.
+- The model keeps the text before the box: a box drawn too small is overflowed, the
+  words stay whole.
+- Outpaint and reframe from a plain-text prompt fill the new area with invented text: a
+  layout placed on the original image (lot 3b) is the fix.
 - Inpaint: describe the whole picture, not only the patch.
 
 ## Editing with references: crispz-flux3
 
-Ideogram 4 does not edit from references. The **Edit in crispz-flux3** tab hands the
+MOSS-Image does not edit from references. The **Edit in crispz-flux3** tab hands the
 image (and up to 3 references) to crispz-flux3 on the same machine, through its own
 protocol v1 command line:
 - set the crispz-flux3 install folder in the tab (`crispz_flux3_dir`);
 - if crispz-flux3's app is running, the edit goes through it (model warm); if not, it
-  runs in crispz-flux3's own process after crispz-ideogram frees its VRAM;
+  runs in crispz-flux3's own process after crispz-moss frees its VRAM;
 - mind the ports: both apps start on 7860, and the second one started takes 7861.
   crispz-flux3 looks for its own app at its `cli_protocol.instance_url` (7860 by
   default), so **start crispz-flux3 first**, or point that setting at the port its app
-  really uses. If it finds crispz-ideogram there instead, the hand-over says so and runs
+  really uses. If it finds crispz-moss there instead, the hand-over says so and runs
   crispz-flux3 cold.
 
 Nothing leaves the machine: the files go under the output folder (`handoff/`).
-
-## Local and cloud
-
-**Everything above runs locally.** The Ideogram cloud functions (Ideogram 4.5 precise
-edit, replace background, remix, remove background, upscale, transparent, vectorize, SVG,
-the cloud magic prompt and Describe, through api.ideogram.ai in the United States) exist
-in the code but are **off and hidden**: no tab, no button, nothing sent. To turn them on:
-`"ideogram_cloud_enabled": true` in `config.txt`, restart, then the API key in the
-*Cloud (Ideogram)* tab. Every call is then logged (`CLOUD:` lines) and written to
-`ideogram_cloud_journal.jsonl` in the output folder. They have never been called with a
-real key: the endpoints are checked against Ideogram's published API v2 specification
-only.
 
 ## Command line
 
 `python app.py --help`, the cheat sheet in [README_CLI.md](README_CLI.md), and the
 family protocol: `czp caps` / `czp gen --spec spec.json` (routes to the running app,
-else runs locally). `caps` says what is emulated (`supports.emulated`) and whether the
-cloud is on (`supports.cloud`).
+else runs locally). `caps` says what is emulated (`supports.emulated`).
 
 ## Tests
 
-`.venv\Scripts\python -m pytest tests -q` (CPU, a tiny random Ideogram 4; green in CI).
-On the GPU, app closed: `.venv\Scripts\python -m pytest tests\test_ideogram_e2e.py -s`
-(gen 1024, gen 2048, img2img, inpaint, Stop; images in `tests/e2e_*.png`). The lot
-scripts in `tools/` (`gpu_lot1_check.py`, `gpu_lot2_check.py`, `gpu_lot3_check.py`)
-measure each part on the card.
+`.venv\Scripts\python tools\run_tests.py` (CPU, a tiny random MOSS-Image, one process
+per test file: what the CI runs). The lot scripts in `tools/` (`gpu_lot1_check.py`,
+`gpu_lot2_check.py`, `gpu_lot3_check.py`) measure each part on the card, GPU free.
 
 ## Credits
 
-diffusers (Apache-2.0) for `Ideogram4Pipeline`; Ideogram's open caption verifier and
-magic prompt (Apache-2.0, `third_party/ideogram4/`); vtracer (MIT); rembg (MIT); the
-crispz family (crispz-klein, crispz-flux3) this studio is forked from. How and why:
+OpenMOSS for MOSS-Image and its pipeline (Apache 2.0, vendored in
+`third_party/moss_image/`); Qwen (Qwen3.5-9B, Apache 2.0); Black Forest Labs (the FLUX.2
+VAE); diffusers and transformers; vtracer (MIT); rembg (MIT); the crispz family
+(crispz-klein, crispz-flux3, crispz-ideogram) this studio is forked from. How and why:
 [FORK.md](FORK.md); the full work log: [CLAUDE.md](CLAUDE.md).

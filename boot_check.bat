@@ -1,5 +1,5 @@
 @echo off
-REM Generic boot check for crispz-ideogram (replaces the old rtx5090 scripts).
+REM Generic boot check for crispz-moss (replaces the old rtx5090 scripts).
 REM
 REM Diagnoses the machine BEFORE launching the app, whatever the card
 REM (RTX 50xx / 40xx / 30xx / 20xx...), and stops dead when the configuration
@@ -20,7 +20,7 @@ REM WARNING about --lan / --web: the app has NO authentication at all and serves
 REM the output folder + the model folders. See "Scope" in SECURITY.md.
 
 setlocal enabledelayedexpansion
-title crispz-ideogram - Boot Check
+title crispz-moss - Boot Check
 cd /d "%~dp0"
 
 set "NORUN=0"
@@ -45,7 +45,7 @@ goto argloop
 :argdone
 
 echo ====================================================
-echo    crispz-ideogram - Boot Check
+echo    crispz-moss - Boot Check
 echo ====================================================
 echo.
 
@@ -148,14 +148,14 @@ if "!HW!"=="3" (
 )
 if "!HW!"=="2" echo    [WARN] CPU mode: generating will be very slow.
 
-REM --- 4. The diffusers blocks of this model family, and the UI framework ---
+REM --- 4. The stack of this model family, and the UI framework ---
 REM     BLOCKING, not a warning: launching anyway ends in an ImportError traceback a few
-REM     seconds later, in the window that closes. FLUX.3 has no pipeline class, diffusers
-REM     serves it as modular blocks (0.42.1+).
-echo [4/5] diffusers / gradio...
-!RUNPY! -c "from diffusers.modular_pipelines import Flux3DistilledAutoBlocks, Flux3AutoBlocks; import gradio; print('    FLUX.3 modular blocks OK, gradio', gradio.__version__)" 2>nul
+REM     seconds later, in the window that closes. MOSS-Image's pipeline is vendored; it
+REM     needs the Qwen3.5 encoder of transformers 5.21+ and the FLUX.2 VAE of diffusers 0.42.1+.
+echo [4/5] transformers / diffusers / gradio...
+!RUNPY! -c "from transformers import Qwen3_5Model; from diffusers import AutoencoderKLFlux2, FlowMatchEulerDiscreteScheduler; import gradio; print('    MOSS-Image stack OK, gradio', gradio.__version__)" 2>nul
 if errorlevel 1 (
-    echo    [BLOCKING] diffusers 0.42.1+ ^(FLUX.3 modular blocks^) or gradio missing in this Python.
+    echo    [BLOCKING] transformers 5.21+ ^(Qwen3.5^), diffusers 0.42.1+ or gradio missing in this Python.
     echo    Run install.bat ^(creates .venv with the validated versions^), or update.bat
     echo    if .venv exists. The app was not started.
     pause & exit /b 4
@@ -183,7 +183,7 @@ set "CF_PORT=7860"
 if defined EXPOSE (
     echo ----------------------------------------------------
     echo  [SECURITY] Network exposure requested ^(--!EXPOSE!^).
-    echo  crispz-ideogram has NO authentication and serves your output folder
+    echo  crispz-moss has NO authentication and serves your output folder
     echo  as well as your model folders. Only expose it on a network you
     echo  trust. See the "Scope" section of SECURITY.md.
     echo ----------------------------------------------------
@@ -223,7 +223,7 @@ if "!NORUN!"=="1" (
     endlocal & exit /b 0
 )
 echo ====================================================
-echo    Checks OK. Starting crispz-ideogram...
+echo    Checks OK. Starting crispz-moss...
 echo ====================================================
 timeout /t 2 /nobreak >nul
 call "%~dp0run.bat" %PASSTHRU%

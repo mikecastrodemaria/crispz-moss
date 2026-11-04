@@ -78,71 +78,11 @@ def test_a_preview_failure_never_reaches_the_render():
         P.preview_end()
 
 
-# --- Ideogram 4: same VAE, (p, p, c) tokens normalized with the FLUX-ordered bn stats ----
-def _flux_and_ideogram_tokens(r, mean, std):
-    """The same raw VAE latent in both layouts. FLUX.2 through diffusers' own helpers;
-    Ideogram as the exact inverse of pipeline_ideogram4's decode (bn, view, permute)."""
-    from diffusers import Flux2Pipeline
-    B, C, H, W = r.shape
-    pf = Flux2Pipeline._patchify_latents(r)
-    pf = (pf - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1)
-    flux = Flux2Pipeline._pack_latents(pf)
-    ide = r.view(B, C, H // 2, 2, W // 2, 2).permute(0, 2, 4, 3, 5, 1)
-    ide = ide.reshape(B, (H // 2) * (W // 2), 4 * C)
-    ide = (ide - mean.view(1, 1, -1)) / std.view(1, 1, -1)
-    # The pipeline's own decode must give r back, or the inverse above is wrong.
-    z = ide * std.view(1, 1, -1) + mean.view(1, 1, -1)
-    z = z.view(B, H // 2, W // 2, 2, 2, C).permute(0, 5, 1, 3, 2, 4).reshape(B, C, H, W)
-    assert torch.allclose(z, r, atol=1e-5)
-    return flux, ide
-
-
-class _FakeVae:
-    def __init__(self, mean, var, eps=1e-4):
-        self.bn = types.SimpleNamespace(running_mean=mean, running_var=var)
-        self.config = types.SimpleNamespace(batch_norm_eps=eps)
-
-
-def test_ideogram_projection_equals_flux_on_the_same_latent():
-    """The folded matrix applied to Ideogram tokens == the FLUX matrix applied to the FLUX
-    tokens of the same latent. Random bn stats, so neither the permutation nor the affine
-    correction can pass by luck (the real VAE was measured: MAE 52-61 -> 13-24 / 255)."""
-    g = torch.Generator().manual_seed(0)
-    mean = torch.randn(128, generator=g)
-    var = torch.rand(128, generator=g) * 3 + 0.2
-    vae = _FakeVae(mean, var)
-    std = torch.sqrt(var + 1e-4)
-    r = torch.randn(1, 32, 24, 32, generator=g) * 2
-    flux, ide = _flux_and_ideogram_tokens(r, mean, std)
-    m, b = P._latent_rgb_on(torch.device("cpu"), torch.float32)
-    ref = flux[0] @ m + b
-    pm, pb = P._ideogram_preview_proj(vae)
-    got = ide[0] @ pm + pb
-    assert torch.allclose(got, ref, atol=1e-4), (got - ref).abs().max()
-    # ... and the FLUX matrix as is on Ideogram tokens is NOT that (the bug fixed).
-    assert not torch.allclose(ide[0] @ m + b, ref, atol=1e-2)
-
-
-def test_ideogram_pipe_gets_its_projection_others_do_not():
-    vae = _FakeVae(torch.zeros(128), torch.ones(128))
-    Ideogram4Pipeline = type("Ideogram4Pipeline", (), {})
-    Flux2KleinPipeline = type("Flux2KleinPipeline", (), {})
-    ide = Ideogram4Pipeline()
-    ide.vae = vae
-    fl = Flux2KleinPipeline()
-    fl.vae = vae
-    assert P._preview_proj_for(ide) is not None
-    assert P._preview_proj_for(types.SimpleNamespace(_pipe=ide)) is not None   # wrapper
-    assert P._preview_proj_for(fl) is None
+# --- MOSS-Image: FLUX order, the FLUX.2 matrix as is ------------------------------------
+def test_moss_uses_the_flux_matrix_as_is():
+    """MOSS packs its tokens like FLUX.2 and normalizes each channel with its own bn
+    statistics: no derived projection, whatever object the callback hands over."""
     assert P._preview_proj_for(None) is None
-    img = P.latent_preview_image(_lat(512, 256), 512, 256, proj=P._preview_proj_for(ide))
+    assert P._preview_proj_for(types.SimpleNamespace(_pipe=object())) is None
+    img = P.latent_preview_image(_lat(512, 256), 512, 256, proj=P._preview_proj_for(None))
     assert img is not None and img.width == 2 * img.height
-
-
-if __name__ == "__main__":
-    tests = [v for k, v in sorted(globals().items())
-             if k.startswith("test_") and callable(v)]
-    for fn in tests:
-        fn()
-        print(f"OK {fn.__name__}")
-    print(f"All {len(tests)} latent preview tests passed.")

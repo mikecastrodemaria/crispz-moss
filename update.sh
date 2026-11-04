@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update crispz-ideogram (Unix): fetches the GitHub commits then brings the
+# Update crispz-moss (Unix): fetches the GitHub commits then brings the
 # dependencies back in line with the lock, WITHOUT breaking the existing install.
 #
 #   --force-deps   reinstall the deps even when nothing has changed
@@ -17,7 +17,7 @@ for a in "$@"; do
   esac
 done
 
-echo "=== crispz-ideogram - update ==="
+echo "=== crispz-moss - update ==="
 RUNPY=python3
 export PYTHONUTF8=1   # trustmark's sdist setup.py is not cp1252-safe
 [ -x ".venv/bin/python" ] && RUNPY=".venv/bin/python"
@@ -105,8 +105,8 @@ if [ "$HW" = "3" ]; then
   echo "[BLOCKING] torch does not support this card (see the fix above)."
   exit 3
 fi
-"$RUNPY" -c "from diffusers.modular_pipelines import Flux3DistilledAutoBlocks, Flux3AutoBlocks; print('diffusers: FLUX.3 modular blocks OK')" || {
-  echo "[ERROR] diffusers no longer ships the FLUX.2 Klein pipelines."
+"$RUNPY" -c "from transformers import Qwen3_5Model; from diffusers import AutoencoderKLFlux2, FlowMatchEulerDiscreteScheduler; print('MOSS-Image stack OK (transformers Qwen3.5, diffusers FLUX.2 VAE)')" || {
+  echo "[ERROR] the MOSS-Image stack no longer imports (transformers Qwen3_5Model, diffusers FLUX.2 VAE)."
   echo "  Run install.sh again, or restore: $RUNPY -m pip install -r $SNAP"; exit 1; }
 "$RUNPY" -c "import cz_ui; print('app: imports OK')" || {
   echo "[ERROR] the application no longer imports."; exit 1; }

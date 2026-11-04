@@ -725,6 +725,41 @@ Lecture :
   bouger, textes fiables ». Décision de Mike.
 - Refine 12 contre 36 steps : non jugé (images non reçues) ; 7,8 contre 19,6 s.
 
+### Ménage des références à Ideogram (04/11/2026, demande de Mike)
+
+- **Retirés** : `cz_ideogram.py` (ses marqueurs de famille Ideogram, `llm_cond_proj`...,
+  et la largeur 4608 des LoRAs sont repris dans `cz_moss`, qui défère à `cz_flux3` pour
+  FLUX : un fichier Ideogram reste refusé en nommant crispz-ideogram),
+  `tests/test_ideogram_engine.py`, `test_ideogram_emulated.py`, `test_ideogram_e2e.py`,
+  `tests/ideogram_tiny.py` ; la projection d'aperçu Ideogram de `cz_pipeline`
+  (`_preview_proj_for` rend None : MOSS range ses tokens dans l'ordre FLUX, la matrice
+  FLUX.2 s'applique telle quelle) et sa partie de `test_latent_preview` ; le profil
+  `ideogram` de `cz_core.MODEL_PROFILES` ; les alias CLI `--ideogram-model` /
+  `--ideogram-transformer`.
+- **Renommés crispz-moss / MOSS-Image** : tous les scripts (`run`, `install`, `update`,
+  `boot_check`, `xyz_example`, `civitai_index*`, .bat et .sh), les en-têtes de modules,
+  l'Asset Browser (titre, user agent CivitAI), `fooocus_extra.json`, `SECURITY.md`,
+  `config_modification_tutorial.txt`, `styles/SOURCE.txt`, `wildcards/example.txt`,
+  les commentaires de `requirements*.txt`, les aides de l'UI (presets, ratio, guidance,
+  sampler, offload, dossier de checkpoints, transformer, CivitAI), les messages du CLI,
+  du protocole, du handoff et de `cz_vector` / `cz_prompt`.
+- **Vérification d'installation** : `install.*`, `update.*` et `boot_check.bat`
+  testaient les blocs modulaires FLUX.3 de diffusers ; ils importent désormais
+  `transformers.Qwen3_5Model` et le VAE FLUX.2 de diffusers (la pile que MOSS exige).
+- **Sélecteur « Text encoder »** : resté grisé avec l'aide Ideogram alors que
+  `cz_pipeline` applique un encodeur de remplacement depuis le lot 1 ; rendu actif et
+  câblé (`_ui_set_text_encoder`, refus nommé d'une autre taille).
+- `README.md` réécrit pour MOSS (licence Apache 2.0 en tête, chaîne des licences, ce que
+  fait l'app, mesures des lots 1 à 3, A/B, limites) ; `README_CLI.md` adapté ; `FORK.md`
+  réécrit (base crispz-ideogram, tableau des différences), l'ancien gardé en
+  `FORK-ideogram.md`.
+- Test : `test_no_visible_flux3_or_ideogram_wording_in_the_ui` parcourt l'UI construite
+  et n'admet « Ideogram » que pour nommer crispz-ideogram ou les LoRAs refusées.
+- Restent, à dessein : `CLAUDE.md`, `CHANGELOG.md`, `FORK-*.md` (historique) ; les
+  refus qui nomment crispz-ideogram ; `tools/gpu_lot1_check.py` (A/B contre ses affiches).
+- Suite complète : **66 fichiers sur 66** (3 fichiers Ideogram retirés) ; smoke 22/22 ;
+  `check_config_keys` OK.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

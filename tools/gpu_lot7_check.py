@@ -1,5 +1,5 @@
-"""Lot 7 on the GPU: the refine steps rescaled for Ideogram, the tiled upscale, the
-detailer (the open points of lot 3), through the app's own functions.
+"""Upscale, tiled upscale and detailer on the GPU (inherited from crispz-ideogram's lot 7),
+through the app's own functions, on MOSS-Image.
 
   0. INIT      bench/lot2/hand.png when it exists (the lot 2 poster), else a 1024 render
                of the poster preset; and a 1024 portrait with a face for the detailer.

@@ -7,10 +7,10 @@ outside 'choices', the .then chain that applies the model then re-reads the OLD 
 and the next run ran on the previous model. From the user's side: "I change model, it is
 still the default model".
 
-On crispz-ideogram every single file is refused, each for its own reason said in one
-sentence: a FLUX.2 / FLUX.3 file is the other family (it names the crispz that runs it),
-an Ideogram 4 one has no diffusers single-file converter yet. There is one base repo
-(the official nf4 one; mirrors or local folders through `ideogram_base_repos`).
+On crispz-moss a foreign single file is refused for its own reason, said in one
+sentence: a FLUX.2 / FLUX.3 / Ideogram 4 file is another family (it names the crispz
+that runs it); a MOSS-Image single file loads. Two base repos (SFT and Base; mirrors or
+local folders through `moss_base_repos`).
 (crispz-flux3's Distilled/Base swap tests were removed with that feature, 2026-11-01.)
 
 No model is loaded here: everything happens on safetensors headers.

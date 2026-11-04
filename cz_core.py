@@ -44,7 +44,7 @@ CONFIG_SAMPLE_PATH = os.path.join(HERE, "config-sample.txt")
 DEFAULT_MODEL = "4x-ClearRealityV1_Soft.safetensors"
 DEFAULT_FACTOR = 2.0
 DEFAULT_DENOISE = 0.30
-DEFAULT_STEPS = 12          # measured on Ideogram 4 (lot 7): 36 looks the same, 53 % slower; to re-measure on MOSS (lot 3)
+DEFAULT_STEPS = 12          # refine steps; 12 against 36 measured on MOSS in bench/lot3 (judge on images)
 DEFAULT_TILE = 760
 DEFAULT_OVERLAP = 32
 # Tiling of the diffusion pass (4K+). 0 = the whole image (the default).
@@ -112,11 +112,10 @@ DEFAULT_OUTPUT_FORMAT = CONFIG.get("default_output_format", DEFAULT_OUTPUT_FORMA
 # so the UI does not display a value suggesting an active CFG). 'flux-3' / 'flux3' catch
 # the mirrors and community files (unsloth/flux-3-image-klein-GGUF, flux3-xxx.safetensors).
 # crispz-moss: 'moss' first (50 steps, CFG 3.0, the official MOSS-Image settings; the
-# Base and SFT checkpoints share them). 'ideogram' and the FLUX.3 entries stay for the
-# family files a shared models folder may hold; they never apply to the MOSS base repo.
+# Base and SFT checkpoints share them). The FLUX.3 entries stay for the family files a
+# shared models folder may hold; they never apply to the MOSS base repo.
 MODEL_PROFILES = CONFIG.get("model_profiles") or {
     "moss": {"steps": 50, "guidance": 3.0},
-    "ideogram": {"steps": 48, "guidance": 7.0},
     "flux-3-image-klein-base": {"steps": 50, "guidance": 3.5},
     "flux-3-image-klein": {"steps": 16, "guidance": 1.0},
     "flux-3": {"steps": 16, "guidance": 1.0},
