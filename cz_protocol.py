@@ -61,12 +61,12 @@ OPS = ("caps", "gen", "upscale", "edit", "inpaint")
 # it). Static on purpose: `caps` must answer without importing the pipeline
 # (torch). Krea 2 has no img2img / inpaint pipeline -> variation (upscale
 # with factor 1) and inpaint are refused with exit 3, never faked.
-# crispz-moss: MOSS-Image is text to image only. img2img and inpaint will be EMULATED in
-# lot 3 (SDEdit on the tail of the native schedule, latent blending for the mask, the
-# crispz-ideogram technique); until then both are refused with exit 3, never faked.
-# `caps` lists the emulated ones in supports.emulated once they exist.
-FAMILY_CAPS = {"img2img": False, "inpaint": False}
-EMULATED_CAPS = ()
+# crispz-moss: MOSS-Image is text to image only; img2img and inpaint are EMULATED by
+# cz_moss (lot 3: SDEdit on the tail of the native schedule, latent blending for the
+# mask, the crispz-ideogram technique). They work for every caller, and `caps` says they
+# are emulated (supports.emulated) so a caller can tell them from a native pipeline.
+FAMILY_CAPS = {"img2img": True, "inpaint": True}
+EMULATED_CAPS = ("img2img", "inpaint")
 
 # Spec fields known to the protocol (v1). An unknown field is a warning,
 # never an error: a spec written for another family tool must go through.

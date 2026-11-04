@@ -133,8 +133,8 @@ def test_live_preview_reads_the_4d_latents():
 def test_protocol_caps():
     caps = cz_protocol.caps_dict()["supports"]
     assert caps["negative"] is True
-    assert caps["img2img"] is False and caps["inpaint"] is False
-    assert caps["emulated"] == []
+    assert caps["img2img"] is True and caps["inpaint"] is True
+    assert caps["emulated"] == ["img2img", "inpaint"]
     assert caps["edit"] is False and caps["refs"] is False
     assert caps["cloud"]["enabled"] is False and caps["cloud"]["ops"] == []
     assert cz_protocol.TOOL == "crispz-moss"
@@ -241,3 +241,56 @@ def test_vram_estimate_follows_the_encoder_precision():
     assert P._moss_auto("none", "fits", 31.8) == ("model", P._moss_auto("none", "fits", 31.8)[1])
     assert P._moss_auto("none", "fits", 48.0)[0] == "none"
     assert P._moss_auto("sequential", "x", 31.8)[0] == "sequential"
+
+
+# --- lot 3: the app's img2img / inpaint / outpaint paths on the emulated MossPipe --------
+def _img(w=256, h=256):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (w, h), (40, 90, 200))
+    ImageDraw.Draw(im).ellipse([w // 4, h // 4, 3 * w // 4, 3 * h // 4], fill=(240, 200, 20))
+    return im
+
+
+def test_inpaint_run_goes_through_the_emulated_inpaint():
+    from PIL import Image, ImageDraw
+    mask = Image.new("L", (256, 256), 0)
+    ImageDraw.Draw(mask).rectangle([128, 0, 255, 255], fill=255)
+    out = _run(lambda: P.inpaint_run(_img(), mask, "a red door", 4, 0.8, 3))
+    assert out.size == (256, 256)
+    kw = CALLS[-1]
+    assert kw["mask_image"] is not None and kw["strength"] == 0.8
+
+
+def test_refine_whole_is_an_img2img():
+    def go():
+        return P._refine_whole(P.get_pipe("img2img"), _img(320, 256), 0.35, 8, "x", 1)
+    out = _run(go)
+    assert out.size == (320, 256)
+    kw = CALLS[-1]
+    assert kw["strength"] == 0.35 and kw.get("mask_image") is None
+
+
+def test_reframe_and_directional_outpaint_run():
+    out = _run(lambda: P.reframe(_img(256, 256), 16, 9, "contain", "x", 3, 1))
+    assert out.width > out.height
+    assert CALLS[-1]["mask_image"] is not None
+    out2 = _run(lambda: P.outpaint_directions(_img(256, 256), None, ["right"], "x", 3, 1))
+    assert out2.width > 256
+
+
+def test_a_layout_draft_follows_the_image_size_in_img2img():
+    """A draft drawn for another canvas does not force its size on an img2img: it is
+    rescaled to the image's (said), and the output is the image's size."""
+    import cz_design
+    draft = cz_design.prompt_of("Logo (square)")          # drawn for 1024x1024
+    said = []
+    real = P._log                       # the note is logged by cz_pipeline (_qwen_call)
+    P._log = lambda m: said.append(m)
+    try:
+        out = _run(lambda: P._refine_whole(P.get_pipe("img2img"), _img(320, 256), 0.5, 4,
+                                           draft, 1))
+    finally:
+        P._log = real
+    assert out.size == (320, 256)
+    assert any("rescaled to the image's 320x256" in m for m in said), said
+

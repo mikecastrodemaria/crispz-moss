@@ -23,8 +23,10 @@ The upstream pipeline is `third_party/moss_image/pipeline_moss_image.py`, vendor
 
     plus `encode_prompt` for cz_pipeline's embedding cache, the encoder-only 'model'
     offload (the DiT and the VAE stay on the card, the 9B encoder comes in for the prompt
-    and leaves at the first DiT forward), named refusals for img2img / inpaint (lot 3) and
-    editing, and the family detection the LoRA and checkpoint guards rely on.
+    and leaves at the first DiT forward), img2img and inpaint EMULATED (lot 3: `image` +
+    `strength` runs SDEdit on the tail of MOSS's own schedule, `mask_image` adds latent
+    blending, see _prepare_emulated), a named refusal for editing (an `image` alone), and
+    the family detection the LoRA and checkpoint guards rely on.
 
 Single files (ComfyUI / CivitAI layout, `load_transformer(single_file=...)` and
 `load_text_encoder(...)`): the DiT in bf16, fp8 (plain cast or scaled) or ComfyUI's
@@ -407,12 +409,14 @@ def native_sigmas(steps, scheduler=None):
 
 
 # --- Layout prompts (lot 2) ------------------------------------------------------------
-def prepare_prompt(prompt, width=None, height=None):
+def prepare_prompt(prompt, width=None, height=None, fit=False):
     """What the model gets from a prompt string, and the size to render at:
     (prompt, width, height, note). A layout DRAFT (cz_caption: pixel boxes and its own
     canvas) is compiled to the model form and FORCES the size it was drawn for (a layout
     is worth one size); a COMPILED layout or plain text go through as they are. The note
-    (or None) is what the caller logs."""
+    (or None) is what the caller logs.
+    `fit=True` (img2img / inpaint: the IMAGE sets the canvas): a draft drawn for another
+    size is redrawn at width x height instead (its boxes rescaled), said in the note."""
     if not isinstance(prompt, str):
         return prompt, width, height, None
     try:
@@ -431,8 +435,14 @@ def prepare_prompt(prompt, width=None, height=None):
     compiled, dw, dh = cz_caption.compile(d)
     note = None
     if width and height and (int(width), int(height)) != (dw, dh):
-        note = (f"layout drawn for {dw}x{dh}: rendering at that size, not at "
-                f"{int(width)}x{int(height)} (a layout is worth one size)")
+        if fit:
+            lay, _, _ = cz_caption.from_text(d)
+            compiled, dw, dh = cz_caption.compile(cz_caption.to_draft(lay, width, height))
+            note = (f"layout drawn for {int(d['width'])}x{int(d['height'])}: boxes rescaled "
+                    f"to the image's {dw}x{dh} (img2img: the image sets the size)")
+        else:
+            note = (f"layout drawn for {dw}x{dh}: rendering at that size, not at "
+                    f"{int(width)}x{int(height)} (a layout is worth one size)")
     return compiled, dw, dh, note
 
 
@@ -761,6 +771,112 @@ class MossPipe:
         return self._generate_text(inputs, max_new_tokens, do_sample=False, device=device,
                                    schema=cz_magic.OLLAMA_FORMAT if constrained else None)
 
+    # --- img2img / inpaint, emulated (lot 3) ----------------------------------------------
+    # MOSSImagePipeline has neither: it always starts from pure noise on its own schedule.
+    # SDEdit on a flow-matching model is x_t = (1 - sigma) * x0 + sigma * noise: the image
+    # is encoded to MOSS's latents (the exact inverse of decode_latents: the FLUX.2 VAE,
+    # the 2x2 patches packed in FLUX order, bn-normalized), noised to the sigma of the
+    # first kept step, and only the tail of the schedule runs. The schedule is MOSS's own
+    # (shifted, snapped to the training grid, duplicates removed: native_sigmas), cut at
+    # the index the strength gives and handed to the pipeline as `sigmas` (no shift on
+    # top). The strength is a FRACTION OF THE STEPS, diffusers' and crispz-flux3's rule
+    # (0.35 = the last ~35 % of the steps); at least one step always runs. The guidance is
+    # constant on MOSS: nothing to rotate. Inpaint: after each step the latents outside
+    # the mask are put back to the init image noised to the sigma just reached (latent
+    # blending, the crispz-flux3 technique); the mask is max-pooled to the 16-pixel grid.
+    def _encode_latents(self, image, width, height, device):
+        """Normalized MOSS latents (1, 128, h/16, w/16) of `image` at width x height: the
+        exact inverse of MossPipeline.decode_latents (VAE, (c, p, p) packing, bn)."""
+        import numpy as np
+        from PIL import Image
+        vae = self._pipe.vae
+        img = image.convert("RGB")
+        if img.size != (width, height):
+            img = img.resize((width, height), Image.LANCZOS)
+        x = torch.from_numpy(np.asarray(img, dtype=np.float32) / 127.5 - 1.0)
+        x = x.permute(2, 0, 1)[None].to(device, vae.dtype)
+        with torch.no_grad():
+            r = vae.encode(x).latent_dist.mode().float()
+        return self.pack_latents(r, vae)
+
+    @staticmethod
+    def pack_latents(r, vae):
+        """(b, 32, 2h, 2w) VAE latents -> (b, 128, h, w) MOSS tokens, FLUX channel order
+        (c, p, p), bn-normalized with the stats as stored."""
+        b, c, hh, ww = r.shape
+        z = r.view(b, c, hh // 2, 2, ww // 2, 2).permute(0, 1, 3, 5, 2, 4)
+        z = z.reshape(b, 4 * c, hh // 2, ww // 2)
+        bn = vae.bn
+        mean = bn.running_mean.float().view(1, -1, 1, 1).to(z.device)
+        std = torch.sqrt(bn.running_var.float() + vae.config.batch_norm_eps)
+        return (z - mean) / std.view(1, -1, 1, 1).to(z.device)
+
+    @staticmethod
+    def _mask_latents(mask_image, width, height, device):
+        """(1, 1, h/16, w/16): 1 = repaint, 0 = keep; a token is repainted as soon as ANY
+        of its pixels is (max-pool), so a thin stroke never vanishes below the grid."""
+        import numpy as np
+        from PIL import Image
+        m = mask_image.convert("L")
+        if m.size != (width, height):
+            m = m.resize((width, height), Image.NEAREST)
+        t = torch.from_numpy(np.asarray(m, dtype=np.float32) / 255.0)[None, None]
+        return torch.nn.functional.max_pool2d(t, kernel_size=GRID, stride=GRID).to(device)
+
+    @staticmethod
+    def _is_full_mask(mask_image):
+        try:
+            return mask_image.convert("L").getextrema()[0] >= 250
+        except Exception:
+            return False
+
+    def _prepare_emulated(self, kw, init, mask_image, strength, steps, w, h, generator,
+                          user_cb):
+        """Fills kw (latents, sigmas) for an img2img / inpaint call and returns
+        (step callback, restore); restore clears the run-steps counter after the call."""
+        p = self._pipe
+        dev = self._offload_device or p._execution_device
+        s = 1.0 if strength is None else float(min(max(float(strength), 0.0), 1.0))
+        full = native_sigmas(steps, p.scheduler)       # what this call would run
+        n = len(full)
+        start = min(int(max(n - n * s, 0)), n - 1)
+        sigma0 = float(full[start])
+        npp = int(kw.get("num_images_per_prompt") or 1)
+        x0 = self._encode_latents(init, w, h, dev).expand(npp, -1, -1, -1).contiguous()
+        g = generator[0] if isinstance(generator, (list, tuple)) else generator
+        noise = torch.randn(x0.shape, generator=g, dtype=torch.float32,
+                            device=g.device if g is not None else "cpu").to(x0.device)
+        kw["latents"] = (1.0 - sigma0) * x0 + sigma0 * noise
+        kw["sigmas"] = list(full[start:])
+        # The live preview counts the steps that RUN (cz_pipeline reads _cz_run_steps);
+        # the progress bar iterates the truncated timesteps and is right by itself.
+        run = n - start
+        p._cz_run_steps = run
+
+        def restore():
+            p._cz_run_steps = None
+        mask = None
+        if mask_image is not None and not self._is_full_mask(mask_image):
+            mask = self._mask_latents(mask_image, w, h, x0.device)
+        kind = "inpaint" if mask is not None else "img2img"
+        _log(f"{kind} (emulated): strength {s:.2f}, {run} of {n} steps from sigma "
+             f"{sigma0:.3f}")
+        if mask is None:
+            return user_cb, restore
+
+        def blend(pipe, i, t, cb_kwargs):
+            lat = cb_kwargs["latents"]
+            sig = pipe.scheduler.sigmas
+            nxt = float(sig[i + 1]) if i + 1 < len(sig) else 0.0
+            known = (1.0 - nxt) * x0 + nxt * noise
+            cb_kwargs["latents"] = mask * lat + (1.0 - mask) * known.to(lat.dtype)
+            if user_cb is not None:
+                out = user_cb(pipe, i, t, cb_kwargs)
+                if isinstance(out, dict):
+                    cb_kwargs = out
+            return cb_kwargs
+        return blend, restore
+
     def __call__(self, prompt=None, image=None, mask_image=None, strength=None,
                  width=None, height=None, num_inference_steps=None, generator=None,
                  guidance_scale=None, num_images_per_prompt=1, negative_prompt=None,
@@ -769,16 +885,20 @@ class MossPipe:
                  callback_on_step_end=None, callback_on_step_end_tensor_inputs=None,
                  output_type="pil", return_dict=True, max_sequence_length=4096,
                  uncond_skip_layers=None, sigmas=None, latents=None, **_ignored):
-        if strength is not None or mask_image is not None:
-            raise NotImplementedError(
-                "img2img / inpaint on MOSS-Image are emulated in lot 3 (SDEdit on the tail "
-                "of the native schedule, latent blending for the mask); not available yet.")
-        if image is not None:
+        emulated = strength is not None or mask_image is not None
+        if emulated:
+            init = image[0] if isinstance(image, (list, tuple)) and image else image
+            if init is None:
+                raise ValueError("img2img / inpaint need an image to start from")
+            # Output size = the asked one, else the image's own (on MOSS's grid).
+            width = width or init.size[0]
+            height = height or init.size[1]
+        elif image is not None:
             raise NotImplementedError(
                 "MOSS-Image does not edit images (text to image only). Local editing: send "
                 "the image to crispz-flux3 (Edit in crispz-flux3 tab).")
         if isinstance(prompt, str):
-            prompt, width, height, note = prepare_prompt(prompt, width, height)
+            prompt, width, height, note = prepare_prompt(prompt, width, height, fit=emulated)
             if note:
                 self._say_once(("layout", note), note)
         steps = int(num_inference_steps or DEFAULTS["moss"]["steps"])
@@ -824,6 +944,10 @@ class MossPipe:
             kw["sigmas"] = list(sigmas)
         if latents is not None:
             kw["latents"] = latents
+        restore = None
+        if emulated:
+            callback_on_step_end, restore = self._prepare_emulated(
+                kw, init, mask_image, strength, steps, w, h, generator, callback_on_step_end)
         if callback_on_step_end is not None:
             kw["callback_on_step_end"] = callback_on_step_end
         self._keep_encoder_offload()
@@ -833,6 +957,8 @@ class MossPipe:
             out = self._pipe(**kw)
         finally:
             self._encoder_out()        # stopped before the first DiT forward, or an error
+            if restore is not None:
+                restore()
         images = out.images if hasattr(out, "images") else out[0]
         return types.SimpleNamespace(images=images) if return_dict else (images,)
 

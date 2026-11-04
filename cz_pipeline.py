@@ -3,11 +3,12 @@ pipeline (cz_moss.MossPipe, behind the same calling convention as crispz-flux3's
 Flux3Pipe) + LoRAs, generation and orchestration (generate / txt2img_run / process_one /
 outpaint / inpaint) + the mutable runtime state.
 
-Ideogram port (crispz-ideogram 0.1, lot 1): the model is loaded by cz_ideogram.load().
-Text to image only for now: img2img, inpaint and outpaint are emulated in lot 3 (the
-cz_flux3 techniques), editing goes through the Ideogram 4.5 API in lot 4. Until then
-the adapter raises a NAMED NotImplementedError on those paths. FLUX.3 code paths are
-kept, unreached, to merge from crispz-flux3 (remote `flux3`) with few conflicts.
+MOSS port (crispz-moss 0.1): the model is loaded by cz_moss.load(). MOSS-Image is text
+to image; img2img, inpaint, outpaint, reframe, refine and the detailer run through the
+adapter's EMULATED img2img / inpaint (lot 3: SDEdit on the tail of the native schedule,
+latent blending under the mask). Editing with references is not available (the adapter
+raises a NAMED NotImplementedError and points at crispz-flux3). FLUX.3 and Ideogram code
+paths are kept, unreached, to merge fixes from the sibling studios with few conflicts.
 
 --- crispz-flux3's notes ---
 
@@ -636,9 +637,15 @@ def _qwen_call(pipe, **kw):
     pipe = _fresh(pipe)          # a reference that outlived free_vram (lot 7)
     if isinstance(pipe, engine.MossPipe) and isinstance(kw.get("prompt"), str):
         # A layout DRAFT (cz_caption) is compiled here, BEFORE the embedding cache sees
-        # the prompt, and forces the size it was drawn for (said once per layout).
+        # the prompt, and forces the size it was drawn for (said once per layout). With
+        # an image (img2img / inpaint, lot 3) the IMAGE sets the size: the draft is
+        # rescaled to it instead.
+        _emul = kw.get("strength") is not None or kw.get("mask_image") is not None
+        if _emul and kw.get("image") is not None and not (kw.get("width") and kw.get("height")):
+            _im = kw["image"][0] if isinstance(kw["image"], (list, tuple)) else kw["image"]
+            kw["width"], kw["height"] = _im.size
         kw["prompt"], kw["width"], kw["height"], _note = engine.prepare_prompt(
-            kw["prompt"], kw.get("width"), kw.get("height"))
+            kw["prompt"], kw.get("width"), kw.get("height"), fit=_emul)
         if _note and _note not in _LAYOUT_SAID:
             _LAYOUT_SAID.add(_note)
             _log(_note)
@@ -3384,7 +3391,7 @@ def _step_end_kwargs(total_steps=0, width=0, height=0):
             return cb_kwargs
         if preview and (i % LIVE_PREVIEW_EVERY == 0):
             # An emulated img2img / inpaint runs the tail of the schedule only: count the
-            # steps it really runs (set by cz_ideogram._prepare_emulated).
+            # steps it really runs (set by cz_moss.MossPipe._prepare_emulated).
             total = getattr(pipe, "_cz_run_steps", None) or total_steps
             _store_preview(cb_kwargs.get("latents"), i + 1, total, width, height,
                            pipe=pipe)

@@ -624,6 +624,62 @@ Ollama.
   dans le rapport. Test : `test_describe_through_an_ollama_vision_model`. À mesurer chez
   Mike avec son Gemma 4 31B vision (attendu : 15 à 25 s contre 76 s en local).
 
+### Lot 3 (04/11/2026) : img2img, inpaint, outpaint émulés, livré sur `wip/moss-engine`, mesure GPU à faire
+
+- `cz_moss.MossPipe._prepare_emulated` : SDEdit sur la fin du planning propre de MOSS
+  (`native_sigmas` : sigmas décalées puis alignées sur la grille d'entraînement, doublons
+  retirés, calculées sur le scheduler du pipe), `strength` = fraction des steps RÉELS
+  (après dédoublonnage ; au moins un step), image encodée en latents MOSS par l'inverse
+  exact de `decode_latents` (`pack_latents` : VAE FLUX.2, paquets 2x2 dans l'ordre FLUX
+  (c, p, p), normalisation `bn`), bruitée au sigma du premier step gardé, planning
+  tronqué passé en `sigmas` (sans décalage supplémentaire : la méthode de lot 1). Pas de
+  rotation de guidance (constante sur MOSS). Masque : mélange latent à chaque step
+  (`known = (1 - sigma_suivant) * x0 + sigma_suivant * bruit` hors masque), max-pool sur
+  la grille de 16 px, masque tout blanc = img2img simple. La barre de progression
+  parcourt les timesteps tronqués (juste d'elle-même), l'aperçu live lit
+  `_cz_run_steps`, remis à None après l'appel ; le scheduler n'est pas enveloppé (le
+  paramètre `sigmas` du lot 1 suffit). Une image SANS strength ni masque reste un refus
+  nommé (édition : crispz-flux3).
+- **Un layout en img2img suit l'image** : `prepare_prompt(..., fit=True)` redessine un
+  draft fait pour une autre taille aux dimensions de l'image (boîtes remises à l'échelle,
+  dit dans le log) au lieu de forcer sa taille ; `cz_pipeline._qwen_call` passe `fit`
+  dès qu'un `strength` ou un `mask_image` est là (et prend la taille de l'image si
+  l'appelant ne la donne pas). Un rendu texte vers image garde la règle « un layout vaut
+  pour une taille ».
+- `cz_protocol` : `FAMILY_CAPS` img2img et inpaint à True, `supports.emulated` =
+  `["img2img", "inpaint"]`. Débloque refine, upscale par tuiles, inpaint, outpaint,
+  reframe et détailleur de l'app sans autre changement (chemins `inpaint_run`,
+  `_refine_whole`, `reframe`, `outpaint_directions` testés sur le MossPipe miniature).
+- **Preset « Draft » : décision reportée au lot 4, avec la raison.** Le checkpoint DMD
+  8 steps (`lodestones/MOSS-Image-SFT-8-steps-dmd`, lu le 04/11/2026) n'est pas un
+  transformer à charger à 8 steps : sa voie officielle est une LoRA kohya (rang 128 sur
+  `proj.{q,k,v,o,ffn_up_gate,ffn_down}`) PLUS des remplacements fp32 de `time_embedding`
+  et des biais de modulation, PLUS un échantillonneur maison (mélange latent par une
+  matrice Q 128x128 et des codes de step, pas le scheduler du modèle) ; son dossier
+  `transformer/` est marqué obsolète par l'auteur et exige le fp32. Donc : chargeur de
+  LoRA du lot 4, puis un sampler DMD dédié si le gain le justifie. En attendant,
+  `gpu_lot3_check.py` rend le preset affiche à 12, 20, 25 et 50 steps (même seed) pour
+  savoir quel « Draft » du modèle de base vaut la peine ; l'aide de `config-sample.txt`
+  le dit.
+- Tests : `tests/test_moss_emulated.py` (11 : fin du planning natif et retour au planning
+  entier à l'appel suivant, extrêmes de strength, image plus proche à faible strength,
+  inverse exact du décodage sur tokens aléatoires, latents hors masque EXACTEMENT gardés,
+  masque plein, Stop qui rend l'image partielle, max-pool, refus de l'édition, compteurs,
+  négatif + batch de 2 en img2img) ; `test_moss_wiring` +4 (chemins de l'app, draft
+  remis à l'échelle en img2img, caps) ; `test_moss_engine` : le refus « lot 3 » devient
+  le test de l'édition seule. Suite complète : **69 fichiers sur 69** ; smoke 22/22 ;
+  `check_config_keys` OK.
+- `tools/gpu_lot3_check.py` réécrit pour MOSS : init = `bench/lot2/hand_poster.png` et
+  son draft ; img2img 0,3 / 0,6 (même layout, remis à l'échelle), inpaint (vélo rouge
+  dans une boîte centrale), outpaint à droite et reframe 16:9 (légende du preset en texte
+  libre), A/B refine 0,3 à 12 et 36 steps (la question du lot 7 d'Ideogram, à remesurer
+  à 50 steps nominaux), rendus Draft à 12 / 20 / 25 / 50 steps (`--skip-draft`). Temps et
+  pics dans `bench/lot3/report.md`.
+- À faire chez Mike : `git pull`, carte libre, `.venv\Scripts\python tools\gpu_lot3_check.py` ;
+  juger sur images : texte gardé en img2img 0,3 et 0,6, zone hors masque intacte, raccords
+  de l'outpaint et du reframe, 12 contre 36 steps en refine, et à partir de combien de
+  steps le texte du Draft tient.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

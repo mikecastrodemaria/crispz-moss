@@ -2,7 +2,7 @@
 
 Lot 1: text to image through crispz's calling convention, the subclassed pipeline equal
 to the vendored one, callback and Stop, the negative prompt reaching the encoder (and
-cached), size fitting, the named refusals (img2img / inpaint until lot 3, editing, LoRAs
+cached), size fitting, the named refusals (editing, LoRAs
 until lot 4), the encoder-only offload, the family detection the LoRA and checkpoint
 guards rely on, and the ComfyUI / CivitAI single files (bf16 and int8 ConvRot, fused
 qkv) read back to the very same weights.
@@ -97,13 +97,9 @@ def test_interrupt_returns_a_partial_image():
     assert out.images[0].size == (256, 256)          # the next call starts clean
 
 
-def test_img2img_inpaint_and_edit_are_refused_by_name():
-    with pytest.raises(NotImplementedError, match="lot 3"):
-        _pipe()(prompt="x", width=256, height=256, num_inference_steps=1,
-                image=Image.new("RGB", (8, 8)), strength=0.5)
-    with pytest.raises(NotImplementedError, match="lot 3"):
-        _pipe()(prompt="x", width=256, height=256, num_inference_steps=1,
-                image=Image.new("RGB", (8, 8)), mask_image=Image.new("L", (8, 8)))
+def test_edit_and_lora_are_refused_by_name():
+    """An image WITHOUT strength or mask is an edit request: refused and routed to
+    crispz-flux3 (img2img / inpaint, with them, are emulated: test_moss_emulated.py)."""
     with pytest.raises(NotImplementedError, match="crispz-flux3"):
         _pipe()(prompt="x", width=256, height=256, num_inference_steps=1,
                 image=Image.new("RGB", (8, 8)))

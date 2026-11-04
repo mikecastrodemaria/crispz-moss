@@ -39,6 +39,15 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   repaired (said in the notes) and the raw answer is logged. Describe can also go
   through an Ollama vision model (the magic prompt's engine choice), the local encoder
   being the fallback.
+- **Lot 3, emulated img2img / inpaint** (2026-11-04): MOSS-Image has neither; the
+  adapter runs SDEdit on the tail of the model's own schedule (the image encoded to MOSS
+  latents by the exact inverse of the decode, noised to the first kept sigma, the
+  truncated schedule passed as explicit sigmas) and, under a mask, puts the latents
+  outside it back to the noised image after every step (max-pooled mask on the 16 px
+  grid). This unlocks refine, tiled upscale, inpaint, outpaint, reframe and the detailer.
+  A layout draft used in img2img is rescaled to the image instead of forcing its own
+  size. The protocol announces `img2img` and `inpaint` as emulated. The Draft preset on
+  the distilled DMD / 4-step adapters waits for the LoRA loader (lot 4).
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
