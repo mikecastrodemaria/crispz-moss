@@ -2058,6 +2058,35 @@ def _ui_catalog_thumbs(remote, output_dir):
                                             if remote else " Thumbnails: off.")
 
 
+def _ui_catalog_renders(kind, remote, output_dir, progress=gr.Progress(track_tqdm=True)):
+    """The buttons: the dataset's thumbnails or full renders into the app cache (parallel,
+    resumable), then the tabs rewritten so the cards show the local files."""
+    import cz_catalog
+    if not cz_catalog.is_available():
+        return "Download the catalog first (the button above)."
+    try:
+        _allow_runtime_dir(cz_catalog.RENDERS_DIR)
+        n = cz_catalog.download_renders(kind)
+        cz_catalog.write_index(output_dir, bool(remote))
+    except Exception as e:
+        _log(f"character catalog renders ({kind}) failed: {type(e).__name__}: {e}")
+        return f"Renders download failed ({kind}): {e}"
+    return (f"{kind}: {n} files on disk, the Asset Browser cards now use them. "
+            + cz_catalog.status(output_dir))
+
+
+def _allow_runtime_dir(path):
+    """Adds a folder to the running Blocks' allowed_paths (same mechanism as the output
+    folder), so files written there after launch can be served."""
+    try:
+        d = os.path.abspath(path)
+        paths = getattr(_DEMO, "allowed_paths", None)
+        if paths is not None and d not in paths:
+            paths.append(d)
+    except Exception as e:
+        _dbg(f"allow runtime dir failed: {e}")
+
+
 def _asset_focus_url(kind, name):
     """Opens the Asset Browser straight on the 'loras' or 'models' tab, focused on
     'name' (a card = the preview + the trigger words + examples) when it is a local file.
@@ -5249,6 +5278,18 @@ def build_ui():
                                 cat_dl_btn = gr.Button("Download / update the catalog (7 MB, huggingface.co)",
                                                        size="sm")
                             cat_status = gr.Markdown(_ui_catalog_status(DEFAULT_OUTPUT_DIR))
+                            gr.Markdown("The sample renders can be kept locally too (the Asset "
+                                        "Browser then shows them with nothing fetched afterwards): "
+                                        "the 280 px thumbnails are 34,249 files, about 270 MB; the "
+                                        "full renders about 1.8 GB. Parallel and resumable "
+                                        "(a second click only fetches what is missing), about an "
+                                        "hour each at the anonymous Hub rate (an hf_token in "
+                                        "config.txt raises it). Stored under cache/moss/character_catalog.")
+                            with gr.Row():
+                                cat_thumbs_btn = gr.Button("Download the thumbnails (34,249 files, ~270 MB)",
+                                                           size="sm")
+                                cat_images_btn = gr.Button("Download the full renders (~1.8 GB)",
+                                                           size="sm")
 
                     with gr.Tab("Advanced"):
                         gr.Markdown("### Hugging Face access (gated models)")
@@ -5473,6 +5514,12 @@ def build_ui():
         # Open Asset Browser in a new tab (fast: manifest now, thumbnails in background).
         ab_cache_save_btn.click(_ui_set_ab_cache, [ab_cache_tb], [ab_status])
         cat_dl_btn.click(_ui_catalog_download, [cat_thumbs_cb, output_dir], [cat_status])
+        cat_thumbs_btn.click(lambda r, o, progress=gr.Progress(track_tqdm=True):
+                             _ui_catalog_renders("thumbnails", r, o, progress),
+                             [cat_thumbs_cb, output_dir], [cat_status])
+        cat_images_btn.click(lambda r, o, progress=gr.Progress(track_tqdm=True):
+                             _ui_catalog_renders("images", r, o, progress),
+                             [cat_thumbs_cb, output_dir], [cat_status])
         cat_thumbs_cb.change(_ui_catalog_thumbs, [cat_thumbs_cb, output_dir], [cat_status])
         ab_open_btn.click(_ui_gallery_open, [output_dir], [ab_status, gallery_url]).then(
             None, [gallery_url], None, js="(u) => { if (u) window.open(u, '_blank'); }")

@@ -51,6 +51,7 @@ def cached(tmp_path, monkeypatch):
         json.dump({"entries": ENTRIES, "version": "2026-10-31-test"}, f)
     monkeypatch.setattr(C, "CACHE", str(cache))
     monkeypatch.setattr(C, "CACHE_DIR", str(cache.parent))
+    monkeypatch.setattr(C, "RENDERS_DIR", str(cache.parent / "character_catalog"))
     out = tmp_path / "out"
     out.mkdir()
     return str(out)
@@ -150,3 +151,46 @@ def test_the_ui_offers_the_catalog_accordion():
     assert "Show thumbnails from huggingface.co" in labels
     assert any(isinstance(b, gr.Button) and "Download / update the catalog" in str(b.value)
                for b in demo.blocks.values())
+
+
+def test_renders_on_disk_come_first(cached, monkeypatch):
+    """download_renders fetches the dataset folder through huggingface_hub (mocked here:
+    it writes two thumbnails) and says so; the cards then point at the local files, the
+    remote URL only fills the gaps when the option is on; the index knows it is stale."""
+    import huggingface_hub
+    calls, said = [], []
+    monkeypatch.setattr(C, "_log", lambda m: said.append(m))
+
+    def fake_snapshot(repo_id, repo_type, allow_patterns, local_dir, max_workers, token=None):
+        calls.append((repo_id, repo_type, tuple(allow_patterns), local_dir, max_workers))
+        for rel in ("thumbnails/aa/aa11.webp", "thumbnails/bb/bb22.webp"):
+            p = os.path.join(local_dir, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            open(p, "wb").write(b"RIFF")
+        return local_dir
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot)
+    C.write_index(cached, remote_thumbs=True)
+    assert C.index_is_current(cached, True)
+    assert C.renders_present("thumbnails") == 0
+    n = C.download_renders("thumbnails", max_workers=4)
+    assert n == 2 and calls == [(C.SPACE, "dataset", ("thumbnails/*",), C.RENDERS_DIR, 4)]
+    assert any("CATALOG: downloading the dataset folder thumbnails/" in m and "huggingface.co" in m
+               for m in said)
+    assert not C.index_is_current(cached, True)                     # new files on disk: stale
+    tabs, _ = C.browser_entries(C.load()[0], remote_thumbs=False)
+    pika = next(c for c in tabs["characters"] if c["file"] == "aa11")
+    assert pika["thumb"].startswith("/gradio_api/file=") and pika["thumb"].endswith("aa11.webp")
+    assert pika["img"] == ""                                         # no full render, option off
+    tabs, _ = C.browser_entries(C.load()[0], remote_thumbs=True)
+    pika = next(c for c in tabs["characters"] if c["file"] == "aa11")
+    assert pika["thumb"].startswith("/gradio_api/file=")             # local first
+    assert pika["img"] == C.DATASET_BASE + "images/aa/aa11.webp"      # remote fills the gap
+    C.write_index(cached, remote_thumbs=True)
+    m = json.load(open(os.path.join(cached, "_index", "characters.json"), encoding="utf-8"))
+    assert m["renders"] == {"thumbnails": 2, "images": 0}
+    assert "2 thumbnails on disk" in C.status(cached)
+    assert C.renders_estimate("thumbnails", 34249) == "34,249 files, about 268 MB"
+    assert C.renders_estimate("images", 34249) == "34,249 files, about 1.8 GB"
+    with pytest.raises(ValueError):
+        C.download_renders("videos")
+

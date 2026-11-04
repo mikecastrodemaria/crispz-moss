@@ -35,7 +35,7 @@ attached. The other crispz studios stay better at photos and editing.
 | **img2img, inpaint, outpaint, reframe** | **emulated**: MOSS-Image has no native pipeline for them. SDEdit on the tail of its own schedule, latent blending under the mask |
 | **Upscale** | ESRGAN + diffusion refine, tiled |
 | **Single files** | ComfyUI / CivitAI DiTs (bf16, fp8, int8 ConvRot) and Qwen3.5 encoders (bf16, int8 ConvRot) load; the 4-bit builds are refused with the reason |
-| **Character catalog** | the MOSS-Image Character Catalog (34,249 samples: characters by copyright, styles, each with its prompt, tags and facets) as Asset Browser tabs, downloaded once on a click; a card sends its prompt or tags to the prompt box. Uncurated, third-party IP: not for client work |
+| **Character catalog** | the MOSS-Image Character Catalog (34,249 samples: characters by copyright, styles, each with its prompt, tags and facets) as Asset Browser tabs, downloaded once on a click, the sample renders optionally kept locally (thumbnails 270 MB, full renders 1.8 GB); a card sends its prompt or tags to the prompt box. Uncurated, third-party IP: not for client work |
 | **Send to prompt** | from the Asset Browser, an output's prompt, a LoRA's trigger words or one of its CivitAI example prompts goes straight into the app's prompt box |
 | **Vectorize (SVG)** | locally with vtracer: made for logos, icons and flat colours |
 | **Remove BG** | locally with rembg |

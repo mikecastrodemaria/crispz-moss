@@ -806,6 +806,8 @@ def cli_main(argv=None):
         # to be served too, the thumbnails are referenced there by absolute URL.
         import cz_assetbrowser as _ab
         _thumbs_dir = _ab._thumbs_root(_ab._ab_resolve_dir(DEFAULT_OUTPUT_DIR))[0]
+        import cz_catalog
+        _renders_dir = cz_catalog.RENDERS_DIR          # the catalog's sample renders, when fetched
         # Optional auth (the Gradio login page). Off by default (localhost). The source:
         # --auth > env CRISPZ_AUTH > config 'auth'. Format "user:password" (multi via ",").
         _auth_raw = (args.auth or os.environ.get("CRISPZ_AUTH")
@@ -827,7 +829,7 @@ def cli_main(argv=None):
                           allowed_paths=[os.path.join(HERE, "styles", "samples"),
                                          os.path.join(HERE, "tags"),
                                          _ab_resolve_dir(DEFAULT_OUTPUT_DIR),
-                                         _thumbs_dir] + _model_dirs)
+                                         _thumbs_dir, _renders_dir] + _model_dirs)
         return 0
 
     if not models and not args.no_esrgan:

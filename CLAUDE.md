@@ -795,9 +795,17 @@ Lecture :
 - Tests : `tests/test_catalog.py` (7 : formes, suffixe, vignettes on / off, manifestes et
   fraîcheur, CSV, téléchargement mocké et loggé, pont dans le SPA et dans `CZ_JS`,
   accordéon dans l'UI). Suite : **67 fichiers sur 67** ; smoke 22/22.
-- À suivre (demande de Mike) : récupérer aussi les rendus (vignettes 280 px et images
-  pleine taille du dataset) en local, par `snapshot_download`, boutons séparés et tailles
-  dites.
+- **Les rendus en local** (demande de Mike « récup les render aussi ») : deux boutons dans
+  l'accordéon, `download_renders("thumbnails")` et `("images")` : `snapshot_download` du
+  dataset HF (`allow_patterns`, 8 transferts parallèles, reprise : un second clic ne prend
+  que ce qui manque, `hf_token` de la config s'il existe) dans
+  `cache/moss/character_catalog/`, servi par l'app (`allowed_paths` au lancement et à la
+  volée). Les cartes prennent le fichier local d'abord, l'URL HF seulement avec la case,
+  sinon rien ; le manifeste dit les comptes sur disque et l'index se sait périmé quand
+  des fichiers arrivent. Mesuré le 04/11/2026 sans token : vignettes 280 px, 7,8 Ko
+  chacune (34 249 fichiers, environ 270 Mo), pleines images 54 Ko (environ 1,8 Go) ;
+  10 à 14 fichiers par seconde en anonyme, soit environ une heure par lot : dit dans
+  l'UI. Test : `test_renders_on_disk_come_first` (hub mocké). Suite : 67 fichiers sur 67.
 
 ## 10. Sources
 

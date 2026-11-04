@@ -392,7 +392,9 @@ var ix=-1;for(var k=0;k<VIEW.length;k++){if(VIEW[k].file===_focus||VIEW[k].name=
 if(ix>=0){open(ix);_focus='';}}
 function _apply(m){DATA=m.images||[];if(m.blur)document.body.classList.add('blur');
 GEN_SUFFIX=m.gen_suffix||'';CAT_NOTICE=m.notice||'';var nt=document.getElementById('note');
-if(nt){if(m.notice){nt.textContent=m.notice+(m.remote_thumbs?' Thumbnails are loaded from huggingface.co.':' Thumbnails off (the Asset Browser settings turn them on: loaded from huggingface.co).');nt.style.display='';}else{nt.style.display='none';}}
+if(nt){if(m.notice){var rd=m.renders||{};var src=(rd.thumbnails||rd.images)?(' Renders on disk: '+(rd.thumbnails||0)+' thumbnails, '+(rd.images||0)+' full images'+(m.remote_thumbs?', the rest from huggingface.co.':'.')):
+(m.remote_thumbs?' Thumbnails are loaded from huggingface.co.':' Thumbnails off (the Asset Browser settings download them, or load them from huggingface.co).');
+nt.textContent=m.notice+src;nt.style.display='';}else{nt.style.display='none';}}
 renderFolders();filter();
 if(!DATA.length&&m&&m.building){grid.innerHTML='<p style="padding:20px;color:#8b98ad">Indexing your output folder… '+
 '(first run: can take ~30 s for large folders; it will fill in automatically)</p>';}}

@@ -59,6 +59,8 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   huggingface.co only on option, the names in the prompt autocomplete, the catalog's
   rights notice shown. From any Asset Browser card (an output, a LoRA's trigger words, a
   CivitAI example prompt, a catalog entry) a button sends the text to the app's prompt box.
+  The sample renders can be fetched locally too (thumbnails about 270 MB, full renders
+  about 1.8 GB, resumable), the cards then use the local files.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0

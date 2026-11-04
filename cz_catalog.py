@@ -24,7 +24,7 @@ import gzip
 import json
 import os
 
-from cz_core import HERE, _log, download_with_progress
+from cz_core import CONFIG, HERE, _log, download_with_progress
 
 SPACE = "hide1/MOSS-Image-Character-Catalog"
 CATALOG_URL = f"https://huggingface.co/spaces/{SPACE}/resolve/main/catalog.json.gz"
@@ -32,6 +32,12 @@ DATASET_BASE = f"https://huggingface.co/datasets/{SPACE}/resolve/main/"
 DATASET_PAGE = f"https://huggingface.co/datasets/{SPACE}/blob/main/"
 CACHE_DIR = os.path.join(HERE, "cache", "moss")
 CACHE = os.path.join(CACHE_DIR, "character_catalog.json.gz")
+# The sample renders, when the user asks for them: the dataset's thumbnails/ (280 px
+# WebP, about 8 KB each) and images/ (full size, about 54 KB each), one file per entry,
+# fetched by huggingface_hub.snapshot_download into this folder (served by the app at
+# /gradio_api/file=..., which the launch allows).
+RENDERS_DIR = os.path.join(CACHE_DIR, "character_catalog")
+RENDER_KINDS = {"thumbnails": 8, "images": 54}          # kind -> average KB per file
 KINDS = {"character": "characters", "style": "styles"}
 TAGS_CSV = "moss_catalog.csv"
 STYLE_SUFFIX = " (MOSS caption test)"
@@ -59,6 +65,55 @@ def download(force=False):
     return CACHE
 
 
+def renders_present(kind):
+    """How many files of `kind` (thumbnails / images) are in the local renders folder."""
+    root = os.path.join(RENDERS_DIR, kind)
+    if not os.path.isdir(root):
+        return 0
+    n = 0
+    for _d, _sub, files in os.walk(root):
+        n += sum(1 for f in files if f.lower().endswith(".webp"))
+    return n
+
+
+def renders_estimate(kind, n_entries):
+    """'34,249 files, about 270 MB' for the UI (sizes measured on the dataset, 2026-11-04)."""
+    mb = n_entries * RENDER_KINDS.get(kind, 0) / 1024.0
+    size = f"about {mb / 1024:.1f} GB" if mb >= 1024 else f"about {mb:.0f} MB"
+    return f"{n_entries:,} files, {size}"
+
+
+def download_renders(kind, max_workers=8):
+    """Fetches the dataset's `kind` folder (thumbnails or images) into RENDERS_DIR with
+    huggingface_hub (parallel, resumable: a second run only fetches what is missing).
+    Said in the log. Returns the number of files present afterwards."""
+    if kind not in RENDER_KINDS:
+        raise ValueError(f"unknown render kind {kind!r} (thumbnails or images)")
+    from huggingface_hub import snapshot_download
+    os.makedirs(RENDERS_DIR, exist_ok=True)
+    _log(f"CATALOG: downloading the dataset folder {kind}/ of {SPACE} from huggingface.co "
+         f"into {RENDERS_DIR} ({max_workers} parallel transfers)")
+    # The hf_token of the config (the one used for gated models), when set: the Hub
+    # rate-limits anonymous requests harder (34,249 small files, about an hour at the
+    # anonymous rate measured on 2026-11-04: 10 to 14 files a second).
+    token = (CONFIG.get("hf_token") or "").strip() or None
+    snapshot_download(repo_id=SPACE, repo_type="dataset", allow_patterns=[f"{kind}/*"],
+                      local_dir=RENDERS_DIR, max_workers=int(max_workers), token=token)
+    n = renders_present(kind)
+    _log(f"CATALOG: {kind}: {n} files on disk")
+    return n
+
+
+def _local_url(rel):
+    """The app URL of a render file when it is on disk, else ''."""
+    if not rel:
+        return ""
+    path = os.path.join(RENDERS_DIR, rel.replace("/", os.sep))
+    if not os.path.isfile(path):
+        return ""
+    return "/gradio_api/file=" + os.path.abspath(path).replace("\\", "/")
+
+
 def load(path=None):
     """-> (entries, version) from the cached catalog (or `path`)."""
     with gzip.open(path or CACHE, "rt", encoding="utf-8") as f:
@@ -72,7 +127,8 @@ def browser_entries(entries, remote_thumbs=False):
     """The catalog entries in the Asset Browser's card shape, per tab:
     {"characters": [...], "styles": [...]}, plus the generation-prompt suffix factored
     out of the entries (an entry whose prompt does not end with it keeps the whole text
-    and says `gen_full`)."""
+    and says `gen_full`). A render on disk (download_renders) is used first; the
+    Hugging Face URL only with `remote_thumbs`; else no picture."""
     gens = []
     for e in entries:
         g = e.get("reuse_generation_prompt") or ""
@@ -86,15 +142,18 @@ def browser_entries(entries, remote_thumbs=False):
         if not tab:
             continue
         gen = e.get("reuse_generation_prompt") or ""
+        thumb = _local_url(e.get("demo_thumbnail"))
+        img = _local_url(e.get("demo_image"))
+        if remote_thumbs:
+            thumb = thumb or ((DATASET_BASE + e["demo_thumbnail"]) if e.get("demo_thumbnail") else "")
+            img = img or ((DATASET_BASE + e["demo_image"]) if e.get("demo_image") else "")
         card = {
             "file": e["id"], "name": e.get("name") or e["id"],
             "day": e.get("copyright") or "(root)", "mode": e["kind"],
             "prompt": e.get("copy_prompt") or "", "tags": e.get("copy_tags") or "",
             "facets": {k: v for k, v in (e.get("facets") or {}).items()
                        if v and k not in ("character", "copyright")},
-            "thumb": (DATASET_BASE + e["demo_thumbnail"]) if remote_thumbs and e.get("demo_thumbnail") else "",
-            "img": (DATASET_BASE + e["demo_image"]) if remote_thumbs and e.get("demo_image") else "",
-            "hf": e.get("demo_image") or "",
+            "thumb": thumb, "img": img, "hf": e.get("demo_image") or "",
         }
         if suffix and gen.endswith(suffix):
             card["gen"] = gen[:-len(suffix)]
@@ -126,18 +185,20 @@ def write_index(output_dir, remote_thumbs=False):
     idx = _index_dir(output_dir)
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     counts = {}
+    renders = {k: renders_present(k) for k in RENDER_KINDS}
     for tab, cards in tabs.items():
         manifest = {"count": len(cards), "kind": tab, "generated": stamp, "version": version,
-                    "remote_thumbs": bool(remote_thumbs), "gen_suffix": suffix,
-                    "notice": NOTICE, "source": SPACE, "images": cards}
+                    "remote_thumbs": bool(remote_thumbs), "renders": renders,
+                    "gen_suffix": suffix, "notice": NOTICE, "source": SPACE, "images": cards}
         _write_atomic_text(os.path.join(idx, tab + ".json"),
                            json.dumps(manifest, ensure_ascii=False, separators=(",", ":")))
         counts[tab] = len(cards)
     _write_atomic_text(_meta_path(output_dir), json.dumps({
         "cache_mtime": os.path.getmtime(CACHE), "remote_thumbs": bool(remote_thumbs),
-        "version": version, "counts": counts}))
+        "renders": renders, "version": version, "counts": counts}))
     _log(f"asset-browser catalog: {counts.get('characters', 0)} characters, "
-         f"{counts.get('styles', 0)} styles (thumbnails from huggingface.co: "
+         f"{counts.get('styles', 0)} styles (thumbnails on disk: {renders['thumbnails']}, "
+         f"full renders on disk: {renders['images']}, from huggingface.co: "
          f"{'on' if remote_thumbs else 'off'})")
     return counts
 
@@ -154,7 +215,8 @@ def index_is_current(output_dir, remote_thumbs=False):
         if not all(os.path.isfile(os.path.join(idx, t + ".json")) for t in ("characters", "styles")):
             return False
         return (abs(float(meta.get("cache_mtime", -1)) - os.path.getmtime(CACHE)) < 1.0
-                and bool(meta.get("remote_thumbs")) == bool(remote_thumbs))
+                and bool(meta.get("remote_thumbs")) == bool(remote_thumbs)
+                and (meta.get("renders") or {}) == {k: renders_present(k) for k in RENDER_KINDS})
     except Exception:
         return False
 
@@ -223,12 +285,14 @@ def status(output_dir=None):
         return ("Catalog not downloaded yet. The button fetches catalog.json.gz (about 7 MB) "
                 "from huggingface.co once; the Characters and Styles tabs of the Asset "
                 "Browser then work offline.")
+    renders = ", ".join(f"{renders_present(k)} {k} on disk" for k in RENDER_KINDS)
     try:
         with open(_meta_path(output_dir), encoding="utf-8") as f:
             meta = json.load(f)
         counts = meta.get("counts") or {}
         return (f"Catalog cached ({meta.get('version') or 'unknown version'}): "
-                f"{counts.get('characters', '?')} characters, {counts.get('styles', '?')} styles.")
+                f"{counts.get('characters', '?')} characters, {counts.get('styles', '?')} styles; "
+                f"{renders}.")
     except Exception:
         stamp = datetime.datetime.fromtimestamp(os.path.getmtime(CACHE)).strftime("%Y-%m-%d %H:%M")
-        return f"Catalog cached ({stamp}); the Asset Browser builds its tabs when opened."
+        return f"Catalog cached ({stamp}); the Asset Browser builds its tabs when opened; {renders}."
