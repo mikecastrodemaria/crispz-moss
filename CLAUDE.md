@@ -575,9 +575,16 @@ Lecture sur images (les six rendus, lus en session) :
   nvcc + MSVC ; flash-linear-attention : Triton à la version exacte de torch 2.11) :
   refusé, trop risqué pour le venv. Réponse : le moteur **Ollama**, déjà par défaut,
   à mesurer (`--engine ollama`). Le moteur local reste utile sans Ollama.
-- À relancer chez Mike : `git pull`, puis `tools\gpu_lot2_check.py --engine local`
-  (le lm_head est en cache, le Describe seul est à juger : `describe_logo_boxes.png`),
-  puis `--engine ollama` avec un modèle Qwen3.5 ou autre installé.
+- **Moteur Ollama mesuré** (`--engine ollama`, lancé juste après, AVANT le correctif du
+  Describe) : affiche suisse 110,6 s (premier appel : Ollama charge son modèle sur une
+  carte où le DiT occupe déjà 10 Go), logo café **12,4 s** ; 2 JSON valides sur 2, textes
+  présents, rendus 31,8 et 44,2 s. Soit 6 fois plus vite que le moteur local (77 s) en
+  régime établi : **Ollama reste le défaut**, le moteur local est le secours sans Ollama.
+  Le rapport n'écrivait pas le modèle Ollama utilisé : ajouté (`0_env.ollama_model`).
+  Layouts à la main identiques (89,0 s et 91,9 s : le premier rendu à froid coûte
+  toujours 85 à 90 s).
+- À relancer chez Mike : `git pull`, puis `tools\gpu_lot2_check.py --engine ollama`
+  (le Describe est à juger : `describe_logo_boxes.png`, et le rapport dira le modèle).
 
 ## 10. Sources
 

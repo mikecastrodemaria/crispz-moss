@@ -150,6 +150,17 @@ def main():
         _say("outlines is NOT installed: the local magic prompt is unconstrained "
              "(pip install outlines==1.3.3 outlines-core==0.2.14).")
     RESULTS["steps"]["0_env"]["engine"] = engine or cz_magic.engine()
+    if RESULTS["steps"]["0_env"]["engine"] == "ollama":
+        # which model answers (the setting, else the first one Ollama lists)
+        try:
+            import cz_ollama
+            import prompt_improve
+            model = (cz_magic._setting("magic_prompt_ollama_model",
+                                       cz_magic.CONFIG.get("magic_prompt_ollama_model", ""))
+                     or (prompt_improve.list_models(base=cz_ollama._improve_base()) or ["?"])[0])
+        except Exception as e:
+            model = f"? ({type(e).__name__})"
+        RESULTS["steps"]["0_env"]["ollama_model"] = model
     off = _arg("--offload")
     if off:
         P.set_offload_mode(off)
