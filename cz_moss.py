@@ -737,9 +737,12 @@ class MossPipe:
                                    temperature=temperature, seed=seed, device=device,
                                    schema=cz_magic.OLLAMA_FORMAT if constrained else None)
 
-    def describe_image(self, image, max_new_tokens=MAGIC_MAX_NEW_TOKENS, device=None):
+    def describe_image(self, image, max_new_tokens=MAGIC_MAX_NEW_TOKENS, device=None,
+                       constrained=True):
         """An image -> a layout draft text (boxes in pixels of the image), with the
-        loaded Qwen3.5-9B: its vision tower and the LM head. Greedy: deterministic."""
+        loaded Qwen3.5-9B: its vision tower and the LM head. Greedy: deterministic.
+        Constrained to the draft schema like the magic prompt (an unconstrained
+        description once came back as invalid JSON on the 5090)."""
         import cz_magic
         proc = self._processor()
         img = image.convert("RGB")
@@ -755,7 +758,8 @@ class MossPipe:
                 {"type": "text", "text": "Describe this image as the layout draft."}]}]
         inputs = proc.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
                                           return_dict=True, return_tensors="pt")
-        return self._generate_text(inputs, max_new_tokens, do_sample=False, device=device)
+        return self._generate_text(inputs, max_new_tokens, do_sample=False, device=device,
+                                   schema=cz_magic.OLLAMA_FORMAT if constrained else None)
 
     def __call__(self, prompt=None, image=None, mask_image=None, strength=None,
                  width=None, height=None, num_inference_steps=None, generator=None,

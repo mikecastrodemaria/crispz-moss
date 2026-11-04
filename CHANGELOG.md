@@ -33,6 +33,10 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   one tensor downloaded once with an HTTP range, outlines JSON guide). Describe (local)
   reads an image through Qwen3.5's vision tower. The Ideogram cloud code, its tab, its
   tests, its tool and the vendored Ideogram verifier are removed.
+  First GPU pass (2026-11-04): hand layouts and local magic prompt render every text
+  exactly, inside their boxes; Describe came back as invalid JSON because it ran
+  unconstrained: now constrained by the draft schema, cut or malformed answers are
+  repaired (said in the notes) and the raw answer is logged.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0

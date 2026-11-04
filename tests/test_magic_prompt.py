@@ -63,6 +63,9 @@ def test_clean_reads_what_llms_actually_return():
     with pytest.raises(M.MagicPromptError, match="no JSON object"):
         M.clean("I cannot do that", 1024, 1024)
     with pytest.raises(M.MagicPromptError, match="invalid JSON"):
+        M.clean('{"summary": : "broken"}', 1024, 1024)
+    # an unterminated string is closed by the repair; the object then lacks items
+    with pytest.raises(M.MagicPromptError, match="no 'items'"):
         M.clean('{"summary": "unterminated}', 1024, 1024)
     with pytest.raises(M.MagicPromptError, match="no 'items'"):
         M.clean('{"caption": "a plain caption"}', 1024, 1024)
@@ -162,10 +165,54 @@ def test_describe_plumbing_on_the_tiny_pipe():
     pipe.set_lm_head(_tiny_head(pipe))
     pipe.enable_model_cpu_offload(device="cpu")
     img = Image.new("RGB", (640, 360), (200, 30, 30))
-    a = pipe.describe_image(img, max_new_tokens=4)
-    b = pipe.describe_image(img, max_new_tokens=4)
+    a = pipe.describe_image(img, max_new_tokens=4, constrained=False)
+    b = pipe.describe_image(img, max_new_tokens=4, constrained=False)
     assert isinstance(a, str) and a == b
     assert not pipe._te_on_gpu
+
+
+def test_describe_is_constrained_to_the_draft_schema(monkeypatch):
+    """Describe passes the same JSON schema as the magic prompt to the generator (an
+    unconstrained description came back as invalid JSON on the card)."""
+    from PIL import Image
+    from moss_tiny import tiny_pipe
+    pipe = tiny_pipe()
+    pipe.set_lm_head(_tiny_head(pipe))
+    seen = {}
+
+    def fake(self, inputs, max_new_tokens, **kw):
+        seen.update(kw)
+        return "{}"
+    monkeypatch.setattr(cz_moss.MossPipe, "_generate_text", fake)
+    pipe.describe_image(Image.new("RGB", (64, 64)), max_new_tokens=4)
+    assert seen["schema"] is M.OLLAMA_FORMAT
+    pipe.describe_image(Image.new("RGB", (64, 64)), max_new_tokens=4, constrained=False)
+    assert seen["schema"] is None
+
+
+def test_clean_repairs_a_cut_or_malformed_answer():
+    """An answer cut by the token budget (open string, dangling key, open arrays and
+    objects) or with trailing commas is repaired and said; hopeless text still fails
+    with the whole answer kept on the error."""
+    full = {"summary": {"caption": "A sign."}, "items": [
+        {"label": "text", "caption": "Red.", "text": "OPEN", "bbox": [10, 20, 300, 100]},
+        {"label": "object", "caption": "A cup.", "bbox": [10, 120, 300, 400]}]}
+    body = json.dumps(full)
+    cut_in_string = body[:body.index('"A cup."') + 4]
+    cut_at_key = body[:body.index('"bbox": [10, 120')] + '"bbox":'
+    cut_in_array = body[:body.index("300, 400]")] + "300,"
+    for raw in (cut_in_string, cut_at_key, cut_in_array):
+        text, warnings = M.clean(raw, 320, 480)
+        d = json.loads(text)
+        assert d["items"][0]["text"] == "OPEN" and len(d["items"]) in (1, 2), raw
+        assert any("repaired" in w for w in warnings)
+    trailing = body.replace('"bbox": [10, 20, 300, 100]}', '"bbox": [10, 20, 300, 100,],}')
+    text, warnings = M.clean(trailing, 320, 480)
+    assert len(json.loads(text)["items"]) == 2 and any("repaired" in w for w in warnings)
+    assert M._repair_json(body) is None
+    with pytest.raises(M.MagicPromptError) as e:
+        M.clean("{ this is not json at all", 320, 480)
+    assert e.value.raw == "{ this is not json at all"
 
 
 def test_describe_cleans_to_a_draft_at_the_image_size(monkeypatch):

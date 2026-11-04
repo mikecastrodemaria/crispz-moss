@@ -34,7 +34,12 @@ ENGINE_LABELS = {"ollama": "Ollama (local LLM)",
 
 
 class MagicPromptError(RuntimeError):
-    """A magic prompt that could not produce a layout, with a message to show as is."""
+    """A magic prompt that could not produce a layout, with a message to show as is.
+    `raw` keeps the model's whole answer for the log and the bench reports."""
+
+    def __init__(self, message, raw=None):
+        super().__init__(message)
+        self.raw = raw
 
 
 def _setting(key, default=None):
@@ -104,6 +109,37 @@ OLLAMA_FORMAT = {
 _FENCE_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*|\s*```$")
 
 
+def _repair_json(text):
+    """A best-effort repair of the JSON an LLM returns: trailing commas dropped, an
+    answer cut short (token budget, or a model that stopped mid-way) closed: the open
+    string, a dangling key, then the open arrays and objects. Returns the repaired text
+    (to parse again), or None when nothing changed."""
+    s = re.sub(r",\s*([\]}])", r"\1", text.rstrip())
+    stack, in_str, esc = [], False, False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "[{":
+            stack.append("]" if ch == "[" else "}")
+        elif ch in "]}" and stack:
+            stack.pop()
+    if in_str:
+        s += '"'
+    # a key without its value (`"bbox":` or `"bbox"`) cannot be closed: dropped
+    s = re.sub(r'(,|\{)\s*"(?:[^"\\]|\\.)*"\s*(:\s*)?$', r"\1", s)
+    s = re.sub(r",\s*$", "", s)
+    s += "".join(reversed(stack))
+    return s if s != text else None
+
+
 def clean(raw, width, height, validate=True):
     """Raw model text -> (draft_text, warnings). The JSON object is read out of the
     answer (thinking, fences and prose around it dropped), the boxes are taken as
@@ -115,18 +151,33 @@ def clean(raw, width, height, validate=True):
     text = _FENCE_RE.sub("", text).strip()
     a, b = text.find("{"), text.rfind("}")
     if a < 0 or b <= a:
-        raise MagicPromptError(f"the magic prompt returned no JSON object: {text[:160]!r}")
+        raise MagicPromptError(f"the magic prompt returned no JSON object: {text[:160]!r}",
+                               raw=raw)
+    repaired = None
     try:
         d = cz_caption.parse(text[a:b + 1])
     except ValueError as e:
-        raise MagicPromptError(f"the magic prompt returned invalid JSON ({e}): "
-                               f"{text[a:a + 160]!r}")
+        # A cut answer has no closing brace to trust: repaired from the first one on.
+        fixed = _repair_json(text[a:])
+        try:
+            d = cz_caption.parse(fixed) if fixed else None
+        except ValueError:
+            d = None
+        if d is None:
+            _log(f"magic prompt: invalid JSON ({e}); the whole answer "
+                 f"({len(text)} chars): {text[:2000]!r}")
+            raise MagicPromptError(f"the magic prompt returned invalid JSON ({e}): "
+                                   f"{text[a:a + 160]!r}", raw=raw)
+        repaired = str(e)
     if "items" not in d:
         raise MagicPromptError("the magic prompt returned no 'items': "
-                               f"{text[a:a + 160]!r}")
+                               f"{text[a:a + 160]!r}", raw=raw)
     d.setdefault("summary", {"caption": ""})
     w, h = int(width), int(height)
     warnings = []
+    if repaired:
+        warnings.append(f"JSON repaired (the answer was cut or malformed: {repaired}); "
+                        f"check the last items")
     # The canvas the answer drew for: the one asked, unless it says otherwise or its
     # boxes overflow (an LLM that ignored the size, or answered in 0..1000).
     try:

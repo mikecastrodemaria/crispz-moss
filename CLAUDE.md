@@ -534,6 +534,51 @@ Le décodage VAE en fp32 coûte environ 5 Go de pic à 1024 dans les deux modes.
   le lm_head, 2 Go) puis `--engine ollama` si un modèle Ollama est là ; juger les
   `*_boxes.png` (textes dans les boîtes ?) et les drafts du magic prompt.
 
+### Premier passage GPU du lot 2 (04/11/2026, Mike) : layouts et magic prompt OK, Describe corrigé
+
+`tools/gpu_lot2_check.py --engine local`, offload 'model' encodeur seul, encodeur bf16,
+50 steps, CFG 3,0, outlines présent, 9 minutes en tout :
+
+| étape | temps | résultat |
+|---|---|---|
+| layout à la main, logo 1024 | 84,4 s | « BEAN THERE » exact, texte et symbole dans leurs boîtes |
+| layout à la main, affiche 1152x1632 | 89,7 s | « GRAND OPENING », « SATURDAY 9 AM · RUE DU PAIN » exacts, les trois boîtes tenues |
+| magic prompt local, affiche suisse | 113,9 s (dont lm_head 2 Go et compilation du schéma) + rendu 30,8 s | JSON valide, « 5B » et « MOSS, real typography » présents |
+| magic prompt local, logo café | 76,9 s + rendu 43,5 s | JSON valide, « BEAN THERE » seul, aucun « COFFEE SHOP » ajouté |
+| Describe local du logo | échec | JSON invalide (ligne 21, virgule attendue) |
+
+Lecture sur images (les six rendus, lus en session) :
+- Layouts à la main : 3 textes sur 3 exacts, chaque texte et chaque objet dans sa boîte
+  (`*_boxes.png`), composition propre. **Critère d'acceptation du lot 2 atteint** sur la
+  partie « légende à la main ».
+- Magic prompt : 2 JSON valides sur 2, textes demandés présents, aucun texte ajouté ; le
+  layout a bien joué son rôle de garde-fou sur le logo café (leçon du lot 1 confirmée).
+  Placement : sur l'affiche suisse, Qwen a dessiné la boîte « 5B » trop étroite (le 5
+  seul) et le modèle a gardé le texte entier en débordant ; « MOSS, real typography »
+  est rendu 25 px au-dessus de sa boîte. Sur le logo, texte et tasse dans leurs boîtes.
+  Le modèle tient le texte avant la boîte : à dire dans l'aide de l'éditeur.
+- Le logo à la main (84 s pour 1024, contre 39 s en A/B) est le premier rendu du
+  processus : prompt et négatif nouveaux (deux allers-retours de l'encodeur de 16,8 Go),
+  noyaux CUDA à chaud. Les rendus suivants retrouvent les temps du lot 1 (+4 s
+  d'encodage par prompt nouveau).
+- **Describe : cause trouvée et corrigée.** La description tournait SANS contrainte de
+  schéma (seul le magic prompt passait le guide outlines). Désormais `describe_image`
+  est contraint par le même schéma (`constrained=True`), `cz_magic.clean` répare une
+  réponse coupée ou malformée (virgules traînantes, chaîne, clé, tableaux et objets
+  laissés ouverts ; dit dans les notes « JSON repaired », derniers items à relire), la
+  réponse brute entière va dans le log et, pour le script, dans
+  `bench/lot2/describe_raw.txt`. Tests : +2 (`test_describe_is_constrained_to_the_draft_schema`,
+  `test_clean_repairs_a_cut_or_malformed_answer`).
+- Magic prompt local : 77 s par brief, c'est la génération token par token de Qwen3.5
+  avec les replis torch (`causal_conv1d_update`, `fused_recurrent_gated_delta_rule`).
+  Les noyaux manquants ne s'installent pas sous Windows sans compiler (causal_conv1d :
+  nvcc + MSVC ; flash-linear-attention : Triton à la version exacte de torch 2.11) :
+  refusé, trop risqué pour le venv. Réponse : le moteur **Ollama**, déjà par défaut,
+  à mesurer (`--engine ollama`). Le moteur local reste utile sans Ollama.
+- À relancer chez Mike : `git pull`, puis `tools\gpu_lot2_check.py --engine local`
+  (le lm_head est en cache, le Describe seul est à juger : `describe_logo_boxes.png`),
+  puis `--engine ollama` avec un modèle Qwen3.5 ou autre installé.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

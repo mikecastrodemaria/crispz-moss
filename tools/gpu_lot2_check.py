@@ -216,6 +216,11 @@ def main():
     except Exception as e:
         RESULTS["steps"]["3_describe"] = {"error": f"{type(e).__name__}: {e}",
                                           "trace": traceback.format_exc()}
+        raw = getattr(e, "raw", None)
+        if raw:
+            with open(os.path.join(OUT, "describe_raw.txt"), "w", encoding="utf-8") as f:
+                f.write(raw)
+            RESULTS["steps"]["3_describe"]["raw"] = "bench/lot2/describe_raw.txt"
         _say(f"describe FAILED: {type(e).__name__}: {e}")
     _save()
 
