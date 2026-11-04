@@ -680,6 +680,51 @@ Ollama.
   de l'outpaint et du reframe, 12 contre 36 steps en refine, et à partir de combien de
   steps le texte du Draft tient.
 
+### Premier passage GPU du lot 3 (04/11/2026, Mike) : émulation validée sur images, deux défauts vus
+
+`tools/gpu_lot3_check.py`, init = l'affiche du lot 2 (1152x1632, 1,9 Mpx) et son draft,
+offload 'model' encodeur seul, encodeur bf16, 50 steps nominaux, 8 minutes en tout :
+
+| étape | temps | pic réservé | taille | lecture sur image |
+|---|---|---|---|---|
+| img2img 0,3 (15 steps) | 71,0 s (premier rendu du processus : encodeur pour le prompt ET le négatif, noyaux à froid) | 30,0 Go | 1152x1632 | affiche intacte, textes exacts |
+| img2img 0,6 (30 steps) | 52,3 s | 30,0 Go (réservé non rendu depuis le rendu précédent) | 1152x1632 | une seule image reçue pour les deux : écart 0,3 / 0,6 non jugé |
+| inpaint (boîte centrale, « red retro bicycle ») | 43,4 s | 30,0 Go (idem) | 1152x1632 | vélo rouge net dans le panier, hors masque intact au pixel, raccords propres, textes intacts |
+| outpaint à droite | 43,5 s | 27,2 Go | 1497x1632 | **zone neuve remplie de faux textes** (« EAR. », « BIGNE EIFFOR VEWAY », « BENLO REMORIES FOOM ») et d'une plante |
+| reframe 16:9 (contain) | 39,7 s | 14,3 Go | 1376x768 | **bandes latérales remplies de gros faux titres** (« WIOIJAVE », « HRNJOSY! ») |
+| refine 0,3 à 12 steps | 7,8 s | 15,8 Go | 1152x1632 | images non reçues |
+| refine 0,3 à 36 steps | 19,6 s | 15,8 Go | 1152x1632 | images non reçues |
+| Draft 12 / 20 / 25 / 50 steps (preset affiche, textes de gabarit) | 24,8 / 34,4 / 42,9 / 85,0 s | 25,4 (prompt neuf) puis 15,5 Go | 1152x1632 | **« HEADLINE » et « DATE · PLACE » exacts aux quatre** ; à 12 steps le visage et le col diffèrent un peu, rien de cassé |
+
+Lecture :
+- **L'émulation marche** : img2img garde l'affiche et ses textes, l'inpaint pose le vélo
+  dans la boîte sans toucher au reste, aucune couture. Critère d'acceptation GPU du lot 3
+  atteint sur img2img et inpaint. Inpaint, outpaint et reframe travaillent sur une zone
+  plafonnée à ~1 Mpx (`_cap_work_res`), d'où des temps sous ceux d'un rendu 1,9 Mpx.
+- **Outpaint et reframe inventent du texte** dans les zones neuves. Le prompt était la
+  légende du preset en texte libre (avec « no other text ») : la leçon du lot 1 se
+  répète, seul le LAYOUT tient « rien d'autre que ces mots ». Et quand un draft est
+  passé en img2img, `fit=True` l'ÉTIRE sur le nouveau canevas : les boîtes de texte
+  ne tombent plus sur l'image d'origine. Correctif à faire (lot 3b) : placer le draft
+  au lieu de l'étirer, c'est-à-dire reporter ses boîtes dans le sous-rectangle où
+  l'image d'origine est collée (outpaint : décalage des marges ; reframe : `ox, oy` du
+  contain), à l'échelle de la zone de travail, et garder « no other text » ; le mode
+  texte libre ajoute « No other text. » si la légende ne le dit pas. À mesurer sur les
+  mêmes rendus.
+- **Pic à 30 Go** sur les premiers img2img à 1,9 Mpx : l'encodeur bf16 (16,8 Go) est sur
+  la carte pour le prompt et le négatif pendant que le DiT (10,2 Go) y reste, plus
+  l'encodage VAE fp32 de l'image et les activations ; le pic est inhérent à l'offload
+  « encodeur seul » en bf16 sur 32 Go (lot 1 : 27 Go à 1 Mpx). Les rendus suivants
+  tiennent à 15 Go (prompt en cache). Piste (lot 3b) : pendant l'encodage d'un prompt
+  neuf, sortir le DiT en RAM (10 Go, ~1 s par sens sur PCIe 5) avant de monter
+  l'encodeur, et le remonter après : pic attendu ~19 Go, coût ~2 s par prompt neuf.
+  Alternative sans code : l'encodeur nf4 (plafond 21 Go, verdict sur images en attente).
+- **Draft** : le texte tient à 12 steps (24,8 s avec le prompt neuf, soit ~18 s à
+  chaud, contre 85 s à 50). Proposition : remplacer « Draft (25 steps) » par
+  « Draft (12 steps) » [12, 3.0], aide « brouillon : composition et détails peuvent
+  bouger, textes fiables ». Décision de Mike.
+- Refine 12 contre 36 steps : non jugé (images non reçues) ; 7,8 contre 19,6 s.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
