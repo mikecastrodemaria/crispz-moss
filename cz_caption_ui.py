@@ -233,15 +233,18 @@ def build_panel():
                                         "once).", scale=3)
             p["magic_btn"] = gr.Button("Magic prompt: idea -> layout", variant="primary",
                                        scale=1)
-        with gr.Accordion("Describe an image -> layout (local Qwen3.5-9B)", open=False):
+        with gr.Accordion("Describe an image -> layout", open=False):
             with gr.Row():
                 p["describe_img"] = gr.Image(type="pil", label="Image to describe",
                                              height=220, scale=2)
                 with gr.Column(scale=1):
-                    gr.Markdown("The loaded text encoder (Qwen3.5-9B, vision included) "
-                                "reads the image: summary, palette, every visible text "
-                                "verbatim, and a box per element. Nothing leaves the "
-                                "machine. The first use downloads the LM head (~2 GB).")
+                    gr.Markdown("Reads the image back as a draft: summary, palette, every "
+                                "visible text verbatim, and a box per element. Follows the "
+                                "engine above: Ollama uses a model with the vision "
+                                "capability (the magic prompt's model if it has it, else "
+                                "the first one installed; seconds), Local uses the loaded "
+                                "Qwen3.5-9B with its LM head (about a minute, ~2 GB "
+                                "downloaded once). Nothing leaves the machine.")
                     p["describe_btn"] = gr.Button("Describe -> layout", variant="primary")
         p["caption"] = gr.Textbox(label="Summary caption (the whole image: subject, medium, "
                                         "style, lighting, palette, mood)", lines=3)
@@ -326,10 +329,10 @@ def wire(p, prompt, width, height):
         return (*layout_to_form(lay), warnings_md(warnings, note))
     p["magic_btn"].click(magic, [prompt, p["engine"], width, height], form + [p["status"]])
 
-    def describe(img):
+    def describe(img, which):
         t0 = time.time()
         try:
-            text, warnings = cz_magic.describe(img)
+            text, warnings, used = cz_magic.describe(img, which=which)
         except cz_magic.MagicPromptError as e:
             return (*[gr.update()] * len(form), f"Describe failed: {e}", gr.update(), gr.update())
         except Exception as e:
@@ -338,9 +341,11 @@ def wire(p, prompt, width, height):
                     gr.update(), gr.update())
         lay, w, h = cz_caption.from_text(text)
         return (*layout_to_form(lay),
-                warnings_md(warnings, f"Described locally in {time.time() - t0:.0f} s; "
-                                      f"size set to the image's ({w}x{h})."), w, h)
-    p["describe_btn"].click(describe, [p["describe_img"]], form + [p["status"], width, height])
+                warnings_md(warnings, f"Described ({cz_magic.ENGINE_LABELS[used]}) in "
+                                      f"{time.time() - t0:.0f} s; size set to the "
+                                      f"image's ({w}x{h})."), w, h)
+    p["describe_btn"].click(describe, [p["describe_img"], p["engine"]],
+                            form + [p["status"], width, height])
 
     def from_raw(raw, w, h):
         try:

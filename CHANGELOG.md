@@ -36,7 +36,9 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   First GPU pass (2026-11-04): hand layouts and local magic prompt render every text
   exactly, inside their boxes; Describe came back as invalid JSON because it ran
   unconstrained: now constrained by the draft schema, cut or malformed answers are
-  repaired (said in the notes) and the raw answer is logged.
+  repaired (said in the notes) and the raw answer is logged. Describe can also go
+  through an Ollama vision model (the magic prompt's engine choice), the local encoder
+  being the fallback.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0

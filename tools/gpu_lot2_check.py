@@ -215,12 +215,13 @@ def main():
         src = os.path.join(OUT, "hand_logo.png")
         img = Image.open(src)
         t0 = time.time()
-        text, warnings = cz_magic.describe(img)
+        text, warnings, used = cz_magic.describe(img, which=engine)
         dt = time.time() - t0
         _write("describe_logo", text)
         draw_boxes(img, text, os.path.join(OUT, "describe_logo_boxes.png"))
         found = [t for t in ("BEAN THERE",) if t.lower() in text.lower()]
-        RESULTS["steps"]["3_describe"] = {"seconds": round(dt, 1), "warnings": warnings,
+        RESULTS["steps"]["3_describe"] = {"engine": used, "seconds": round(dt, 1),
+                                          "warnings": warnings,
                                           "texts_read_back": found,
                                           "items": len(json.loads(text)["items"])}
         _say(f"describe: {dt:.1f} s, {len(warnings)} note(s), texts read back: {found}")
@@ -286,7 +287,8 @@ def _report():
         L.append("")
     d = s.get("3_describe")
     if d:
-        L += ["## Describe (local)", "", "```", json.dumps(d, indent=1, ensure_ascii=False),
+        L += [f"## Describe ({d.get('engine', '?')})", "", "```",
+              json.dumps(d, indent=1, ensure_ascii=False),
               "```", ""]
     rows = s.get("4_no_other_text")
     if rows:

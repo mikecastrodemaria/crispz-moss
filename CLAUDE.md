@@ -612,8 +612,17 @@ produisent un JSON valide et une image dont les textes sont aux boîtes demandé
   à mesurer si Mike le veut (le Describe local reste la voie sans Ollama). Note : un
   finetune communautaire de Gemma suit les conditions Gemma, qui ne revendiquent rien
   sur les sorties ; il ne produit que du texte de brief, jamais les images.
-Reste à juger par Mike : `describe_logo_boxes.png` (boîtes sur le symbole et le texte ?)
-et les drafts `magic_*.json` à l'œil. Puis feu vert pour le lot 3.
+**Lot 2 VALIDÉ par Mike le 04/11/2026**, avec une rallonge demandée : le Describe par
+Ollama.
+- **Describe par Ollama** (`cz_magic.describe(image, which)`, rendu (texte, notes,
+  moteur)) : suit le sélecteur de moteur du magic prompt. En mode Ollama, le modèle du
+  magic prompt est pris s'il a la capacité `vision` selon `/api/show`, sinon le premier
+  modèle vision installé (`cz_ollama._ollama_vision_models`) ; sans modèle vision, repli
+  sur le local, dit dans le log. Image en JPEG 1024 px base64, même brief que le local
+  (taille d'origine écrite dedans), schéma du draft en `format`, température 0. L'UI dit
+  le moteur utilisé ; `gpu_lot2_check.py --engine ollama` décrit par Ollama et l'écrit
+  dans le rapport. Test : `test_describe_through_an_ollama_vision_model`. À mesurer chez
+  Mike avec son Gemma 4 31B vision (attendu : 15 à 25 s contre 76 s en local).
 
 ## 10. Sources
 

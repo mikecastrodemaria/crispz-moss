@@ -274,13 +274,75 @@ DESCRIBE_SYSTEM = """You describe an image as a MOSS-Image LAYOUT DRAFT that a r
 Rules: bbox in PIXELS of the image ({width} x {height}), [x_min, y_min, x_max, y_max] from the top-left. Transcribe EVERY visible text exactly, one text item per block, line breaks as \\n, and describe its typography in the caption. One object or character item per main visible thing, 10 to 40 words each, concrete (shape, colour, material, position). summary.caption describes the whole image: subject, medium, style, lighting, palette, mood. palette: 3 to 8 dominant colours as #RRGGBB. Valid JSON only: double quotes, no trailing commas, no markdown."""
 
 
-def describe(image, which="local"):
-    """An image -> (draft_text, warnings) with the loaded Qwen3.5-9B (vision tower and
-    LM head), on this machine. The draft's canvas is the image's size on the 16 grid."""
+DESCRIBE_USER = "Describe this image as the layout draft."
+
+
+def ollama_vision_model(model=None, base=None):
+    """The Ollama model that will read an image: the magic prompt's model when Ollama
+    reports the 'vision' capability for it, else the first vision model installed, else
+    None (the caller falls back on the local engine and says so)."""
+    import cz_ollama
+    base = base or cz_ollama._improve_base()
+    model = model or _setting("magic_prompt_ollama_model",
+                              CONFIG.get("magic_prompt_ollama_model", "")) or None
+    if model:
+        try:
+            info = cz_ollama._ollama_http("/api/show", {"model": model}, base=base, timeout=8)
+            if "vision" in [c.lower() for c in (info.get("capabilities") or [])]:
+                return model
+        except Exception as e:
+            _log(f"describe (ollama): /api/show failed for {model} ({e})")
+    try:
+        models = cz_ollama._ollama_vision_models(base=base)
+    except Exception as e:
+        _log(f"describe (ollama): cannot list the models at {base} ({e})")
+        return None
+    return models[0] if models else None
+
+
+def _ollama_describe(image, model, base=None):
+    """The image (JPEG, 1024 px max, base64) and the Describe brief to a local Ollama
+    vision model, the draft schema as structured output; the raw answer."""
+    import cz_ollama
+    from cz_core import _pil_to_b64_jpeg
+    base = base or cz_ollama._improve_base()
+    system = (DESCRIBE_SYSTEM.replace("{width}", str(image.width))
+              .replace("{height}", str(image.height)))
+    payload = {"model": model, "system": system, "prompt": DESCRIBE_USER,
+               "images": [_pil_to_b64_jpeg(image.convert("RGB"), max_side=1024)],
+               **cz_ollama._ollama_gen_opts(temperature=0.0)}
+    opts = payload.setdefault("options", {})
+    opts["num_predict"] = max(int(opts.get("num_predict") or 0), 2048)
+    payload["format"] = OLLAMA_FORMAT
+    _log(f"describe (ollama, {model}, {base}): sending the image, "
+         f"{image.width}x{image.height}")
+    try:
+        import prompt_improve
+        out = prompt_improve.http("/api/generate", payload, base=base, timeout=300)
+    except Exception as e:
+        raise MagicPromptError(f"Ollama ({model}): {e}")
+    return out.get("response") or ""
+
+
+def describe(image, which=None):
+    """An image -> (draft_text, warnings, engine_used), on this machine: through an
+    Ollama VISION model when the engine is Ollama and one is installed (seconds), else
+    with the loaded Qwen3.5-9B (vision tower and LM head; a minute or so, nothing else
+    to install). The draft's canvas is the image's size on the 16 grid."""
     if image is None:
         raise MagicPromptError("no image to describe")
-    import cz_pipeline
-    raw = cz_pipeline.describe_local(image)
+    which = (which or engine()) if which != "local" else "local"
+    if which == "ollama":
+        model = ollama_vision_model()
+        if model:
+            raw = _ollama_describe(image, model)
+        else:
+            which = "local"
+            _log("describe: no Ollama vision model found (set magic_prompt_ollama_model to "
+                 "one with the 'vision' capability); describing with the local Qwen3.5-9B")
+    if which == "local":
+        import cz_pipeline
+        raw = cz_pipeline.describe_local(image)
     # The boxes come in pixels of the image as shown to the model; the draft is written
     # on the 16 grid (what MOSS renders), the boxes rescaled with it.
     text, warnings = clean(raw, image.width, image.height, validate=False)
@@ -290,5 +352,5 @@ def describe(image, which="local"):
         text = cz_caption.to_prompt(lay, w, h)
     warnings += cz_caption.validate(text)
     if warnings:
-        _log(f"describe: {len(warnings)} note(s): " + "; ".join(warnings[:3]))
-    return text, warnings
+        _log(f"describe ({which}): {len(warnings)} note(s): " + "; ".join(warnings[:3]))
+    return text, warnings, which

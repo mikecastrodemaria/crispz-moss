@@ -221,9 +221,9 @@ def test_describe_cleans_to_a_draft_at_the_image_size(monkeypatch):
     raw = json.dumps({"summary": {"caption": "A sign."}, "items": [
         {"label": "text", "bbox": [100, 200, 900, 400], "text": "OPEN", "caption": "Red."}]})
     monkeypatch.setattr(cz_pipeline, "describe_local", lambda img: raw)
-    text, warnings = M.describe(Image.new("RGB", (1000, 500)))
+    text, warnings, used = M.describe(Image.new("RGB", (1000, 500)), which="local")
     d = json.loads(text)
-    assert (d["width"], d["height"]) == (992, 496) and warnings == []
+    assert (d["width"], d["height"]) == (992, 496) and warnings == [] and used == "local"
     assert d["items"][0]["text"] == "OPEN" and d["items"][0]["bbox"][0] == 99
     with pytest.raises(M.MagicPromptError, match="no image"):
         M.describe(None)
@@ -309,3 +309,59 @@ def test_schema_processor_is_built_or_said(monkeypatch):
         assert procs is not None and len(procs) == 1
     except ImportError:
         assert procs is None
+
+
+def test_describe_through_an_ollama_vision_model(settings, monkeypatch):
+    """Engine Ollama: the magic prompt's model is used when /api/show says 'vision', the
+    image goes as base64 with the brief (the image's size written in) and the draft
+    schema; without any vision model the local engine takes over, said in the log."""
+    import cz_ollama
+    import cz_pipeline
+    import prompt_improve
+    from PIL import Image
+    settings["magic_prompt_engine"] = "ollama"
+    settings["magic_prompt_ollama_model"] = "gemma-vision:latest"
+    answer = {"summary": {"caption": "A sign."}, "items": [
+        {"label": "text", "bbox": [100, 50, 500, 150], "text": "OPEN", "caption": "Red."}]}
+    calls = []
+
+    def http(path, payload=None, base=None, timeout=8):
+        calls.append((path, payload))
+        if path == "/api/show":
+            return {"capabilities": ["completion", "vision"]}
+        return {"response": json.dumps(answer)}
+    monkeypatch.setattr(prompt_improve, "http", http)
+    monkeypatch.setattr(cz_pipeline, "describe_local", lambda img: (_ for _ in ()).throw(
+        AssertionError("the local engine must not run")))
+    text, warnings, used = M.describe(Image.new("RGB", (640, 320), (10, 20, 30)))
+    assert used == "ollama" and json.loads(text)["items"][0]["text"] == "OPEN"
+    gen = [pl for path, pl in calls if path == "/api/generate"][0]
+    assert gen["model"] == "gemma-vision:latest" and gen["format"] is M.OLLAMA_FORMAT
+    assert len(gen["images"]) == 1 and gen["images"][0][:4] == "/9j/"      # a JPEG
+    assert "640 x 320" in gen["system"] and gen["prompt"] == M.DESCRIBE_USER
+    assert gen["options"]["num_predict"] >= 2048 and gen["options"]["temperature"] == 0.0
+    # the configured model has no vision: the first vision model installed is taken
+    calls.clear()
+
+    def http2(path, payload=None, base=None, timeout=8):
+        calls.append((path, payload))
+        if path == "/api/show":
+            return {"capabilities": ["vision"] if payload["model"] == "llava:13b" else []}
+        if path == "/api/tags":
+            return {"models": [{"name": "text-only:latest"}, {"name": "llava:13b"}]}
+        return {"response": json.dumps(answer)}
+    monkeypatch.setattr(prompt_improve, "http", http2)
+    assert M.ollama_vision_model() == "llava:13b"
+    # no vision model at all: the local engine, said
+    monkeypatch.setattr(prompt_improve, "http", lambda path, payload=None, base=None,
+                        timeout=8: {"models": [], "capabilities": []})
+    monkeypatch.setattr(cz_pipeline, "describe_local", lambda img: json.dumps(answer))
+    said = []
+    monkeypatch.setattr(M, "_log", lambda m: said.append(m))
+    _, _, used = M.describe(Image.new("RGB", (640, 320)))
+    assert used == "local" and any("no Ollama vision model" in m for m in said)
+    # an explicit 'local' never touches Ollama
+    monkeypatch.setattr(prompt_improve, "http", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("Ollama must not be called")))
+    assert M.describe(Image.new("RGB", (64, 64)), which="local")[2] == "local"
+
