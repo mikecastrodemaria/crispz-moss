@@ -53,6 +53,12 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   name), every script, module header, UI help, CLI message and document says
   crispz-moss / MOSS-Image, the install and update scripts check the MOSS stack
   (transformers Qwen3.5, diffusers FLUX.2 VAE), and the Text encoder selector is live.
+- **Character catalog and "Send to crispz-moss"** (2026-11-04): the MOSS-Image Character
+  Catalog (hide1 on Hugging Face: 33,935 characters, 314 styles, their prompts, tags and
+  facets) as two Asset Browser tabs, downloaded once on a click (7 MB), thumbnails from
+  huggingface.co only on option, the names in the prompt autocomplete, the catalog's
+  rights notice shown. From any Asset Browser card (an output, a LoRA's trigger words, a
+  CivitAI example prompt, a catalog entry) a button sends the text to the app's prompt box.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0

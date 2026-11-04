@@ -2004,15 +2004,58 @@ def _ui_gallery_open(output_dir):
                            bool(_ab_get("blur_thumbnails")), bool(_ab_get("generate_thumbnails")))
     except Exception as e:
         return f"Gallery open failed: {e}", ""
-    # The LoRAs / Models catalogue (Asset Browser tabs), built in the background.
+    # The LoRAs / Models catalogue (Asset Browser tabs), built in the background; the
+    # Characters / Styles tabs too, when the MOSS catalog is cached and they are stale.
+    def _build():
+        ab_build_catalog(output_dir, cz_pipeline._lora_dirs(), cz_pipeline._checkpoint_dirs())
+        try:
+            import cz_catalog
+            cz_catalog.ensure_index(output_dir, bool(_prefs.get("catalog_remote_thumbs", False)))
+        except Exception as e:
+            _dbg(f"character catalog tabs: {e}")
     try:
-        threading.Thread(target=ab_build_catalog,
-                         args=(output_dir, cz_pipeline._lora_dirs(), cz_pipeline._checkpoint_dirs()),
-                         daemon=True).start()
+        threading.Thread(target=_build, daemon=True).start()
     except Exception as e:
         _dbg(f"catalog build spawn failed: {e}")
     url = "/gradio_api/file=" + os.path.abspath(idx).replace("\\", "/")
     return "Opening Asset Browser in a new tab (indexing in background)...", url
+
+
+def _ui_catalog_status(output_dir):
+    import cz_catalog
+    return cz_catalog.status(output_dir)
+
+
+def _ui_catalog_download(remote, output_dir):
+    """The button: fetches the catalog (7 MB, huggingface.co, said in the log), writes
+    the Asset Browser tabs and the autocomplete CSV."""
+    import cz_catalog
+    _save_prefs_keys({"catalog_remote_thumbs": bool(remote)})
+    try:
+        cz_catalog.download(force=True)
+        counts = cz_catalog.write_index(output_dir, bool(remote))
+        n = cz_catalog.write_tags_csv()
+    except Exception as e:
+        _log(f"character catalog failed: {type(e).__name__}: {e}")
+        return f"Catalog download failed: {e}"
+    return (f"Catalog ready: {counts.get('characters', 0)} characters and "
+            f"{counts.get('styles', 0)} styles in the Asset Browser (tabs Characters / Styles); "
+            f"{n} names added to the prompt autocomplete (at the next launch). "
+            f"Thumbnails from huggingface.co: {'on' if remote else 'off'}.")
+
+
+def _ui_catalog_thumbs(remote, output_dir):
+    """The checkbox: remembered; the tabs are rewritten when the catalog is cached."""
+    import cz_catalog
+    _save_prefs_keys({"catalog_remote_thumbs": bool(remote)})
+    if not cz_catalog.is_available():
+        return cz_catalog.status(output_dir)
+    try:
+        cz_catalog.write_index(output_dir, bool(remote))
+    except Exception as e:
+        return f"Catalog tabs not rewritten: {e}"
+    return cz_catalog.status(output_dir) + (" Thumbnails from huggingface.co: on."
+                                            if remote else " Thumbnails: off.")
 
 
 def _asset_focus_url(kind, name):
@@ -5185,6 +5228,27 @@ def build_ui():
                             ab_reindex_btn = gr.Button("Rebuild ALL thumbnails (force)", size="sm")
                         ab_open_link = gr.HTML("")
                         ab_status = gr.Markdown("")
+                        with gr.Accordion("Character catalog (MOSS-Image, 34,249 samples)", open=False):
+                            gr.Markdown(
+                                "The MOSS-Image Character Catalog (hide1 on Hugging Face): 33,935 "
+                                "characters and 314 styles rendered with MOSS-Image, each with a "
+                                "reusable prompt, its tags and facets. Two tabs in the Asset Browser "
+                                "(Characters, Styles): search by name, copyright, hair, eyes, outfit; "
+                                "a click sends the prompt or the tags to the prompt box; the names "
+                                "join the prompt autocomplete. The catalog file (7 MB) is fetched "
+                                "from huggingface.co ONCE, on the button; the sample thumbnails stay "
+                                "there and load only with the option below (one request per "
+                                "thumbnail shown). **Uncurated, and the characters, artworks and "
+                                "images are third-party intellectual property: not for client "
+                                "deliverables** (the catalog's own notice).")
+                            with gr.Row():
+                                cat_thumbs_cb = gr.Checkbox(
+                                    value=bool(_prefs.get("catalog_remote_thumbs", False)),
+                                    label="Show thumbnails from huggingface.co",
+                                    info="Off: cards show the name only, nothing is fetched.")
+                                cat_dl_btn = gr.Button("Download / update the catalog (7 MB, huggingface.co)",
+                                                       size="sm")
+                            cat_status = gr.Markdown(_ui_catalog_status(DEFAULT_OUTPUT_DIR))
 
                     with gr.Tab("Advanced"):
                         gr.Markdown("### Hugging Face access (gated models)")
@@ -5408,6 +5472,8 @@ def build_ui():
                              [ab_open_link, ab_status])
         # Open Asset Browser in a new tab (fast: manifest now, thumbnails in background).
         ab_cache_save_btn.click(_ui_set_ab_cache, [ab_cache_tb], [ab_status])
+        cat_dl_btn.click(_ui_catalog_download, [cat_thumbs_cb, output_dir], [cat_status])
+        cat_thumbs_cb.change(_ui_catalog_thumbs, [cat_thumbs_cb, output_dir], [cat_status])
         ab_open_btn.click(_ui_gallery_open, [output_dir], [ab_status, gallery_url]).then(
             None, [gallery_url], None, js="(u) => { if (u) window.open(u, '_blank'); }")
         # The 🖼️ icons: open the Asset Browser focused on the selected checkpoint /

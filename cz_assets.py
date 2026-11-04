@@ -105,11 +105,14 @@ grid-template-columns:1fr 360px}#exlb.open{display:grid}
 <button class="src active" data-s="outputs">Outputs</button>
 <button class="src" data-s="loras">LoRAs</button>
 <button class="src" data-s="models">Models</button>
+<button class="src" data-s="characters" title="MOSS-Image Character Catalog (hide1, Hugging Face)">Characters</button>
+<button class="src" data-s="styles" title="MOSS-Image Character Catalog: the 314 styles">Styles</button>
 <button id="hiddenbtn" title="Show hidden folders">Hidden</button>
 <button id="blurbtn">Blur</button>
 <button id="fetchall" title="Fetch missing CivitAI info for every model in this tab" style="display:none">🔄 Fetch all missing</button>
 <button id="rebuildthumbs" title="Force-regenerate every thumbnail of this tab (parallel)">🖼 Rebuild ALL thumbnails (force)</button>
 <span id="count"></span></header>
+<div id="note" style="display:none;padding:6px 12px;color:#ffd27a;font-size:12px;background:#121a27;border-bottom:1px solid var(--line)"></div>
 <div id="wrap"><aside id="folders"></aside><div id="grid"></div></div>
 <div id="lb"><span id="close">&times;</span><span class="nav" id="prev">&#10094;</span>
 <span class="nav" id="next">&#10095;</span><div id="lbimg"><img id="big"></div>
@@ -129,10 +132,13 @@ side=document.getElementById('side'),q=document.getElementById('q'),cnt=document
 folders=document.getElementById('folders'),
 exlb=document.getElementById('exlb'),exbig=document.getElementById('exbig'),exvid=document.getElementById('exvid'),exside=document.getElementById('exside');
 function esc(s){return (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function render(){grid.innerHTML='';VIEW.forEach((e,i)=>{const c=document.createElement('div');
+var _renderLimit=600;   // the catalog tabs hold 34,000 cards: rendered by pages
+function isCat(e){return e&&(e.mode==='character'||e.mode==='style');}
+function render(){grid.innerHTML='';var lim=(curSource==='characters'||curSource==='styles')?_renderLimit:VIEW.length;
+VIEW.slice(0,lim).forEach((e,i)=>{const c=document.createElement('div');
 const label=e.name||e.file;const hasImg=!!(e.thumb||e.img)||curSource==='outputs';
 if(!hasImg){c.className='cell ph loaded';
-c.innerHTML='<div class="ic">'+(e.mode==='lora'?'🧩':'📦')+'</div><div class="n">'+esc(label)+'</div>';
+c.innerHTML='<div class="ic">'+(isCat(e)?esc((e.name||'?').charAt(0).toUpperCase()):(e.mode==='lora'?'🧩':'📦'))+'</div><div class="n">'+esc(label)+'</div>';
 if(e.update)c.innerHTML+='<div class="upd" title="Newer version on CivitAI'+(e.latest?': '+esc(e.latest):'')+'">⚠ update</div>';
 c.onclick=()=>open(i);grid.appendChild(c);return;}
 c.className='cell';
@@ -148,19 +154,37 @@ c.appendChild(im);c.appendChild(cap);
 if(e.update){var ub=document.createElement('div');ub.className='upd';ub.textContent='⚠ update';
 ub.title='Newer version on CivitAI'+(e.latest?': '+e.latest:'');c.appendChild(ub);}
 c.onclick=()=>open(i);grid.appendChild(c);});
+if(VIEW.length>lim){var more=document.createElement('button');more.textContent='Show 600 more ('+(VIEW.length-lim)+' left)';
+more.style.cssText='margin:12px;padding:8px 14px';more.onclick=function(){_renderLimit+=600;render();};grid.appendChild(more);}
 cnt.textContent=VIEW.length+' / '+DATA.length;}
-function hay(e){return (e.file+' '+(e.prompt||'')+' '+(e.negative||'')+' '+(e.mode||'')+' '+
+function hay(e){return (e.file+' '+(e.name||'')+' '+(e.tags||'')+' '+(e.prompt||'')+' '+(e.negative||'')+' '+(e.mode||'')+' '+
 (e.seed||'')+' '+(e.steps||'')+' '+(e.guidance||'')+' '+(e.size||'')+' '+(e.model||'')+' '+
 ((e.loras||[]).join(' '))+' '+((e.styles||[]).join(' '))+' '+(e.sampler||'')+' '+(e.day||'')).toLowerCase();}
-function filter(){const s=q.value.toLowerCase().trim();
+function filter(){const s=q.value.toLowerCase().trim();_renderLimit=600;
 VIEW=DATA.filter(function(e){const d=e.day||'(root)';
 if(!showHidden&&hidden.has(d))return false;
 if(curFolder&&d!==curFolder)return false;
 if(s&&!hay(e).includes(s))return false;return true;});render();}
+var GEN_SUFFIX='';
+function genPrompt(e){return e.gen_full?(e.gen||''):((e.gen||'')+GEN_SUFFIX);}
 function open(i){cur=i;const e=VIEW[i];const isOut=curSource==='outputs';
 const imgUrl=e.img||(isOut?e.file:'');
 if(imgUrl){big.style.display='';big.src=encodeURI(imgUrl);}else{big.style.display='none';}
 let h='';
+if(isCat(e)){
+h+='<h3>Name</h3><div class="v">'+esc(e.name||'')+'</div>';
+h+='<h3>'+(e.mode==='style'?'Group':'Copyright')+'</h3><div class="v">'+esc(e.day||'')+'</div>';
+var fk=Object.keys(e.facets||{});if(fk.length){h+='<h3>Facets</h3><div class="v">'+fk.map(function(k){return k+': '+esc((e.facets[k]||[]).join(', '));}).join('\n')+'</div>';}
+h+='<h3>Prompt</h3><div class="v">'+esc(e.prompt||'(none)')+'</div>';
+if(e.tags)h+='<h3>Tags</h3><div class="v">'+esc(e.tags)+'</div>';
+if(e.gen)h+='<h3>Generation prompt <span style="color:var(--mut);font-weight:400">(full scene, the catalog\'s)</span></h3><div class="v">'+esc(genPrompt(e))+'</div>';
+h+='<div class="v" style="margin:6px 0"><b>Send to crispz-moss:</b> <button onclick="send(\'prompt\',\'replace\')">prompt</button> '+
+'<button onclick="send(\'tags\',\'replace\')">tags</button> <button onclick="send(\'gen\',\'replace\')">generation prompt</button> '+
+'<button onclick="send(\'tags\',\'append\')">append tags</button></div>';
+h+='<div class="v" style="margin:6px 0"><b>Copy:</b> <button onclick="cp(\'prompt\')">prompt</button> <button onclick="cp(\'tags\')">tags</button> <button onclick="cp(\'gen\')">generation prompt</button></div>';
+if(e.hf)h+='<a href="'+encodeURI(CAT_PAGE+e.hf)+'" target="_blank" rel="noopener" style="color:#9fb3d6">Sample image on Hugging Face</a>';
+h+='<div class="v" style="color:#ffd27a;margin-top:10px;font-size:12px">'+esc(CAT_NOTICE)+'</div>';
+side.innerHTML=h;lb.classList.add('open');return;}
 if(e.name&&e.name!==e.file)h+='<h3>Name</h3><div class="v">'+esc(e.name)+'</div>';
 h+='<h3>'+(isOut?'Prompt':'Trigger words')+'</h3><div class="v">'+esc(e.prompt||'(none)')+'</div>';
 if(e.negative)h+='<h3>Negative</h3><div class="v">'+esc(e.negative)+'</div>';
@@ -171,6 +195,9 @@ if(e.loras&&e.loras.length)h+='loras: '+esc(e.loras.join(', '))+'\n';
 h+='file: '+esc(e.file)+'</div>';
 h+='<button onclick="cp(\''+'prompt'+'\')">Copy '+(isOut?'prompt':'triggers')+'</button>';
 h+='<button onclick="cp(\''+'all'+'\')">Copy all</button>';
+if(isOut){h+='<button onclick="send(\'prompt\',\'replace\')" style="margin-left:6px;background:#274b6d;border-color:#3a6ea5" title="Puts this prompt in the app\'s prompt box (switch to the crispz-moss tab)">Send prompt to crispz-moss</button>';
+if(e.negative)h+='<button onclick="send(\'both\',\'replace\')" style="margin-left:6px;background:#274b6d;border-color:#3a6ea5">Send prompt + negative</button>';}
+else{h+='<button onclick="send(\'prompt\',\'append\')" style="margin-left:6px;background:#274b6d;border-color:#3a6ea5" title="Appends the trigger words to the app\'s prompt box">Add triggers to the prompt</button>';}
 if(isOut){h+='<a href="'+encodeURI(e.file)+'" download="'+esc(e.file.split('/').pop())+'" style="margin-left:6px;color:#9fb3d6">Download</a>';
 h+='<button onclick="delAsset()" style="margin-left:6px;background:#5a2230;border-color:#7a2e40">Delete</button>';}
 else{if(e.update)h+='<div class="v" style="color:#ffd27a;margin-bottom:8px">⚠️ Newer version on CivitAI'+(e.latest?': '+esc(e.latest):'')+'</div>';
@@ -187,7 +214,22 @@ EX.map(function(x,ix){var im='<img loading="lazy" src="'+encodeURI(x.url)+'" onc
 return x.video?'<div class="exv">'+im+'<span>&#9654; video</span></div>':im;}).join('')+'</div>';}}
 side.innerHTML=h;lb.classList.add('open');}
 function cp(what){const e=VIEW[cur];let t=e.prompt||'';if(what==='all')t=JSON.stringify(e,null,2);
+if(what==='tags')t=e.tags||'';if(what==='gen')t=genPrompt(e);
 navigator.clipboard.writeText(t).catch(()=>{});}
+// --- Send to the app: the crispz-moss tab listens (BroadcastChannel, localStorage as
+// the fallback), fills the prompt box and tells Gradio. Same origin: nothing leaves.
+function czSend(text,mode,target,negative){if(!text&&negative==null)return;
+var msg={type:'prompt',text:text||'',mode:mode||'replace',target:target||'prompt',t:Date.now()};
+if(negative!=null)msg.negative=negative;
+try{if(window.BroadcastChannel){new BroadcastChannel('crispz-moss').postMessage(msg);}}catch(e){}
+try{localStorage.setItem('cz_prompt_handoff',JSON.stringify(msg));}catch(e){}
+toast('Sent to crispz-moss ('+(msg.mode==='append'?'appended to':'replaced')+' the '+msg.target+'): switch to the app tab.');}
+function send(what,mode){var e=VIEW[cur];if(!e)return;var t=e.prompt||'';
+if(what==='tags')t=e.tags||'';if(what==='gen')t=genPrompt(e);
+czSend(t,mode,'prompt',what==='both'?(e.negative||''):null);}
+function toast(t){var el=document.getElementById('cztoast');if(!el){el=document.createElement('div');el.id='cztoast';
+el.style.cssText='position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#274b6d;color:#fff;padding:8px 14px;border-radius:6px;z-index:999;font-size:13px';
+document.body.appendChild(el);}el.textContent=t;el.style.display='';clearTimeout(el._t);el._t=setTimeout(function(){el.style.display='none';},3500);}
 async function delAsset(){const e=VIEW[cur];if(!e||!confirm('Delete '+e.file+' ?'))return;
 try{const r=await fetch('/gradio_api/call/delete_asset',{method:'POST',headers:{'Content-Type':'application/json'},
 body:JSON.stringify({data:[e.file]})});const j=await r.json();const eid=j.event_id||j.hash;
@@ -277,12 +319,14 @@ h+='<h3>Prompt</h3><div class="v">'+(x.prompt?esc(x.prompt):
 '<span style="color:var(--mut)">(the uploader did not publish the generation parameters for this image)</span>')+'</div>';
 if(x.width&&x.height)h+='<h3>Size</h3><div class="v">'+esc(x.width)+' × '+esc(x.height)+'</div>';
 h+='<button onclick="exCopy()">Copy prompt</button>';
+if(x.prompt)h+='<button onclick="exSend()" style="margin-left:6px;background:#274b6d;border-color:#3a6ea5" title="Puts this example prompt in the app\'s prompt box, to try the LoRA on it">Send to crispz-moss</button>';
 h+='<a href="'+encodeURI(x.video||x.url)+'" target="_blank" style="margin-left:6px;color:#9fb3d6">'+(x.video?'Open video':'Open image')+'</a>';
 exside.innerHTML=h;}
 function exOpen(ix){if(!EX.length)return;excur=(ix+EX.length)%EX.length;exRender();exlb.classList.add('open');}
 function exClose(){exlb.classList.remove('open');exStop();}
 function exNav(d){if(!EX.length)return;excur=(excur+d+EX.length)%EX.length;exRender();}
 function exCopy(){var x=EX[excur];if(x)navigator.clipboard.writeText(x.prompt||'').catch(function(){});}
+function exSend(){var x=EX[excur];if(x&&x.prompt)czSend(x.prompt,'replace','prompt',null);}
 document.getElementById('exclose').onclick=exClose;
 document.getElementById('exprev').onclick=function(){exNav(-1);};
 document.getElementById('exnext').onclick=function(){exNav(1);};
@@ -330,7 +374,9 @@ renderFolders();filter();};
 document.getElementById('hiddenbtn').onclick=function(){showHidden=!showHidden;
 this.classList.toggle('on',showHidden);
 if(_isOut()){renderDays();filter();return;}renderFolders();filter();};
-var _gen='',_focus='';var _srcUrls={outputs:'_index/manifest.json',loras:'_index/loras.json',models:'_index/models.json'};
+var _gen='',_focus='';var _srcUrls={outputs:'_index/manifest.json',loras:'_index/loras.json',models:'_index/models.json',
+characters:'_index/characters.json',styles:'_index/styles.json'};
+var CAT_NOTICE='',CAT_PAGE='https://huggingface.co/datasets/hide1/MOSS-Image-Character-Catalog/blob/main/';
 // --- Outputs: a per-DAY index (Fooocus style) --------------------------------
 // _index/days.json = a {date,count} list (a few KB) -> the page opens straight away.
 // A day's manifest is only loaded when that day is shown. Search, on the other hand,
@@ -344,7 +390,10 @@ return fetch(_dayUrl(day)+'?t='+Date.now()).then(function(r){return r.ok?r.json(
 function _tryFocus(){if(!_focus)return;curFolder='';_folderUserSet=true;renderFolders();filter();
 var ix=-1;for(var k=0;k<VIEW.length;k++){if(VIEW[k].file===_focus||VIEW[k].name===_focus){ix=k;break;}}
 if(ix>=0){open(ix);_focus='';}}
-function _apply(m){DATA=m.images||[];if(m.blur)document.body.classList.add('blur');renderFolders();filter();
+function _apply(m){DATA=m.images||[];if(m.blur)document.body.classList.add('blur');
+GEN_SUFFIX=m.gen_suffix||'';CAT_NOTICE=m.notice||'';var nt=document.getElementById('note');
+if(nt){if(m.notice){nt.textContent=m.notice+(m.remote_thumbs?' Thumbnails are loaded from huggingface.co.':' Thumbnails off (the Asset Browser settings turn them on: loaded from huggingface.co).');nt.style.display='';}else{nt.style.display='none';}}
+renderFolders();filter();
 if(!DATA.length&&m&&m.building){grid.innerHTML='<p style="padding:20px;color:#8b98ad">Indexing your output folder… '+
 '(first run: can take ~30 s for large folders; it will fill in automatically)</p>';}}
 // The sidebar is built from days.json (not from DATA) when the Outputs tab is open.
@@ -386,7 +435,10 @@ if(_fa)_fa.style.display=(CZ_BATCH&&(src==='loras'||src==='models'))?'':'none';
 if(src==='outputs'){DAYS=[];_dayCache={};_allLoaded=false;return loadOutputs();}
 fetch(_srcUrls[src]+'?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(m){
 if(m){_apply(m);_tryFocus();}
-else{DATA=[];renderFolders();grid.innerHTML='<p style="padding:20px;color:#8b98ad">No '+src+' catalog yet (building in background). Reopen the Asset Browser in a few seconds.</p>';cnt.textContent='0 / 0';}});}
+else{DATA=[];renderFolders();var nt=document.getElementById('note');if(nt)nt.style.display='none';
+grid.innerHTML='<p style="padding:20px;color:#8b98ad">'+((src==='characters'||src==='styles')?
+'No character catalog yet: in crispz-moss, Asset Browser settings, "Character catalog", download it (7 MB from huggingface.co), then reopen the Asset Browser.':
+'No '+src+' catalog yet (building in background). Reopen the Asset Browser in a few seconds.')+'</p>';cnt.textContent='0 / 0';}});}
 [].slice.call(document.querySelectorAll('.src')).forEach(function(b){b.onclick=function(){loadSource(b.getAttribute('data-s'));};});
 // Refresh: days.json is tiny -> it can be polled for a long time at no cost.
 function _poll(n){if(n<=0)return;setTimeout(function(){
@@ -442,6 +494,35 @@ CZ_JS = """
   // Fullscreen and the arrows are handled natively by the Gradio gallery
   // (preview / fullscreen). No custom lightbox (it would double up on click).
 }
+
+// --- "Send to crispz-moss" from the Asset Browser (its own tab): fills the prompt box
+// (or the negative) and tells Gradio. BroadcastChannel, localStorage as the fallback.
+(() => {
+  let last = 0;
+  function put(sel, text, mode) {
+    const el = document.querySelector(sel);
+    if (!el || text == null) return null;
+    const v = el.value || '';
+    el.value = (mode === 'append' && v.trim()) ? v.replace(/[ ,]+$/, '') + ', ' + text : text;
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    return el;
+  }
+  function apply(m) {
+    if (!m || m.type !== 'prompt' || !m.t || m.t === last) return;
+    last = m.t;
+    let el = null;
+    if (m.target === 'negative') el = put('#cz_neg textarea', m.text, m.mode);
+    else {
+      el = put('#cz_prompt textarea', m.text, m.mode);
+      if (m.negative != null) put('#cz_neg textarea', m.negative, 'replace');
+    }
+    if (el) el.focus();
+  }
+  try { if (window.BroadcastChannel) new BroadcastChannel('crispz-moss').onmessage = ev => apply(ev.data); } catch (e) {}
+  window.addEventListener('storage', ev => {
+    if (ev.key === 'cz_prompt_handoff' && ev.newValue) { try { apply(JSON.parse(ev.newValue)); } catch (e) {} }
+  });
+})();
 """
 
 

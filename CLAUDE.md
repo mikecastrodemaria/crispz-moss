@@ -760,6 +760,45 @@ Lecture :
 - Suite complète : **66 fichiers sur 66** (3 fichiers Ideogram retirés) ; smoke 22/22 ;
   `check_config_keys` OK.
 
+### Catalogue de personnages et « Send to crispz-moss » (04/11/2026, demande de Mike)
+
+- **`cz_catalog.py`** : le MOSS-Image Character Catalog (`hide1/MOSS-Image-Character-Catalog`,
+  Space et dataset HF ; lu le 04/11/2026) : 33 935 personnages (3 953 séries) et 314 styles
+  rendus par MOSS-Image, chacun avec `copy_prompt`, `copy_tags`, `reuse_generation_prompt`
+  (plein cadre : un suffixe de cadrage identique partout, stocké une fois par manifeste)
+  et des facettes (cheveux, yeux, genre, tenue). `catalog.json.gz` (7 Mo, MIT pour les
+  données de l'auteur) téléchargé UNE fois sur le bouton de l'UI, ligne `CATALOG:` dans le
+  log, rangé dans `cache/moss/character_catalog.json.gz`. Les images restent sur le
+  dataset HF : vignettes chargées par le navigateur seulement si la case est cochée
+  (préférence `catalog_remote_thumbs`, off). Avis de droits de la NOTICE du catalogue
+  (personnages, œuvres et images : IP tierces, pas pour un livrable client ; « non curé »)
+  affiché dans l'accordéon, le bandeau du navigateur et chaque fiche.
+- **Asset Browser** : deux onglets Characters et Styles (`_index/characters.json` 30 Mo,
+  `styles.json`), dossiers latéraux = série (copyright), recherche sur nom, tags, prompt ;
+  cartes paginées par 600 (34 000 divs d'un coup, non) ; fiche : nom, série, facettes,
+  prompt, tags, prompt de génération, lien vers l'image sur HF. Manifestes réécrits à
+  l'ouverture du navigateur s'ils sont absents ou périmés (`ensure_index`, méta
+  `_index/catalog.meta.json`). Autocomplétion : `tags/moss_catalog.csv` (38 137 lignes :
+  personnages catégorie 4 avec leur `source_count`, séries 3, styles 1), lu au prochain
+  lancement comme tout CSV de `tags/`.
+- **« Send to crispz-moss »** : depuis l'Asset Browser (son propre onglet), un bouton
+  envoie un texte dans la zone de prompt de l'app : prompt d'une sortie (ou prompt +
+  négatif), triggers d'une LoRA (ajoutés), **prompt d'un exemple CivitAI** d'une LoRA
+  (remplace : pour essayer la LoRA sur son exemple), prompt / tags / prompt de génération
+  d'une fiche du catalogue. Canal `BroadcastChannel('crispz-moss')` entre les deux onglets
+  (même origine), `localStorage` en repli ; l'app (`CZ_JS`) écrit dans `#cz_prompt` ou
+  `#cz_neg` et déclenche l'événement `input` pour Gradio. Rien ne quitte la machine.
+- Vérifié dans Chromium avec le vrai catalogue : 600 cartes, 33 935 au compteur, 3 954
+  dossiers, recherche « hatsune », fiche complète, envoi reçu par le canal et par
+  localStorage ; puis sur deux onglets (app factice avec `CZ_JS` + navigateur) : remplace,
+  puis ajoute, événement `input` compté.
+- Tests : `tests/test_catalog.py` (7 : formes, suffixe, vignettes on / off, manifestes et
+  fraîcheur, CSV, téléchargement mocké et loggé, pont dans le SPA et dans `CZ_JS`,
+  accordéon dans l'UI). Suite : **67 fichiers sur 67** ; smoke 22/22.
+- À suivre (demande de Mike) : récupérer aussi les rendus (vignettes 280 px et images
+  pleine taille du dataset) en local, par `snapshot_download`, boutons séparés et tailles
+  dites.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
