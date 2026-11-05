@@ -128,7 +128,9 @@ but the community **Moss-Image-Edit LoRA** (chinoll/Moss-Image-Edit, repacked by
 Comfy-Org, rank 64) teaches it the "reference prefix" contract: the image to edit (Ref 1)
 and up to 3 more references are VAE-encoded and put in front of the sequence at t = 0,
 seeing only each other; the target and the instruction see everything; the result takes
-Ref 1's size. The app rewrote that contract on its vendored DiT (nothing of the GPLv3
+Ref 1's size (tick **Output size from Settings** in the tab to use the Settings width /
+height and ratio instead: the LoRA was trained on same-size pairs, texts may hold less
+well). The app rewrote that contract on its vendored DiT (nothing of the GPLv3
 node code is reused) and caches the prefix's keys and values once per edit, so the
 references cost little per step. The LoRA is fetched once (about 300 MB) on the first
 Edit and applied for edits only. **Its author states no licence for the weights** (the

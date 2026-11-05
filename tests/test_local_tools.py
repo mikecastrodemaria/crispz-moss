@@ -48,6 +48,10 @@ def test_the_edit_tab_and_input_mode_are_offered():
     texts = " ".join(str(getattr(b, "value", "")) for b in demo.blocks.values()
                      if isinstance(b, gr.Markdown))
     assert "Moss-Image-Edit LoRA" in texts and "no licence" in texts
+    # the output size switch (Ref 1's size, or the Settings width / height), off by default
+    boxes = [b for b in demo.blocks.values()
+             if isinstance(b, gr.Checkbox) and b.label == "Output size from Settings"]
+    assert len(boxes) == 1 and boxes[0].value is False and "Ref 1" in boxes[0].info
 
 
 def test_no_visible_flux3_or_ideogram_wording_in_the_ui():

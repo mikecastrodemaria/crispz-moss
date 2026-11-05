@@ -86,6 +86,31 @@ def test_generate_omni_edits_one_and_two_references(engine):
         P.generate_omni([], "x", "", 0, 0, 1, 7)
 
 
+def test_edit_output_size_switch(engine, monkeypatch):
+    """The 'Output size from Settings' checkbox of the Edit tab: off (the default) the
+    result takes Ref 1's size whatever the Settings say, on it takes the Settings width /
+    height; the switch is said once per change and remembered in the preferences; the
+    protocol's generate_omni contract (honor_size per spec) is untouched."""
+    import cz_ui
+    lines = []
+    saved = []
+    monkeypatch.setattr(P, "_log", lambda m: lines.append(str(m)))
+    monkeypatch.setattr(cz_ui, "_save_prefs_keys", lambda d: saved.append(dict(d)))
+    monkeypatch.setattr(P, "EDIT_SIZE_FROM_SETTINGS", False)
+    r1 = Image.new("RGB", (64, 48), (200, 30, 30))
+    assert P.generate_omni([r1], "x", "", 96, 64, 1, 7, honor_size=P.EDIT_SIZE_FROM_SETTINGS).size == (64, 48)
+    cz_ui._ui_set_edit_size(True)
+    assert P.EDIT_SIZE_FROM_SETTINGS is True and saved == [{"edit_size_from_settings": True}]
+    assert any("edit output size" in m and "Settings" in m for m in lines)
+    assert P.generate_omni([r1], "x", "", 96, 64, 1, 7, honor_size=P.EDIT_SIZE_FROM_SETTINGS).size == (96, 64)
+    n = len(lines)
+    cz_ui._ui_set_edit_size(True)                      # unchanged: nothing said
+    assert len(lines) == n and saved[-1] == {"edit_size_from_settings": True}
+    cz_ui._ui_set_edit_size(False)
+    assert P.EDIT_SIZE_FROM_SETTINGS is False and "Ref 1" in lines[-1]
+    assert P.generate_omni([r1], "x", "", 96, 64, 1, 7).size == (64, 48)   # the protocol default
+
+
 def test_process_one_refines_through_the_adapter(engine):
     src = Image.new("RGB", (64, 48), (90, 140, 200))
     out, timings = P.process_one(src, None, 1.0, 0.5, 3, "sharpen", 7, 512, 32,

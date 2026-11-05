@@ -116,6 +116,12 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   `SyntaxError: Unexpected token '('` at load and none of the event handlers were
   installed (the Advanced checkbox did nothing, nor the presets). The bridge now lives
   inside the function; a test compiles the page JS the way Gradio does.
+- **Edit (references): "Output size from Settings"** (2026-11-05, asked by Mike, as in
+  crispz-klein): a checkbox of the Edit tab; off (default) the result takes Ref 1's size
+  and ratio, on it takes the Settings width / height and aspect ratio (Ref 1 read at its
+  own size, redrawn at the new one). Remembered in preferences.json
+  (`edit_size_from_settings`, config default too); the protocol keeps its own rule (an
+  explicit size in the spec is honoured).
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
 

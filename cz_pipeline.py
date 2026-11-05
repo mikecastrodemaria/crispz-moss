@@ -377,6 +377,12 @@ FORCE_RATIO = (os.environ.get("CZ_FORCE_RATIO") or CONFIG.get("force_upscale_rat
 # bands). UI (radio) through set_force_ratio_mode, config 'force_ratio_mode'.
 FORCE_RATIO_MODE = (os.environ.get("CZ_FORCE_RATIO_MODE")
                     or CONFIG.get("force_ratio_mode") or "crop").strip().lower()
+# Edit (references): False = the result takes Ref 1's size (what the Moss-Image-Edit
+# LoRA was trained on: same-size pairs); True = the Settings width / height and aspect
+# ratio are honoured instead (the UI checkbox, remembered in preferences.json; the
+# protocol decides per spec with size_explicit and never reads this).
+EDIT_SIZE_FROM_SETTINGS = bool(_prefs.get("edit_size_from_settings",
+                                          CONFIG.get("edit_size_from_settings", False)))
 # Seam-blending pass of the extend mode: after the bands are outpainted, a LIGHT img2img
 # pass runs on the extended image and ONLY the bands plus a feathered transition margin are
 # pasted back from it (the original centre stays untouched). 0 = off.
@@ -4822,7 +4828,8 @@ def generate_omni(refs, prompt, negative, width, height, steps, seed,
     The Moss-Image-Edit LoRA is required and applied hot here (_apply_moss_edit_loras
     fetches the preset once when no edit LoRA is set); it leaves again for text to image.
     `negative` is a real CFG on MOSS-Image. width/height are ignored by default (the
-    output takes the source image's size); honor_size=True passes them to the pipe.
+    output takes the source image's size); honor_size=True passes them to the pipe (the
+    UI's 'Output size from Settings' checkbox, the protocol's size_explicit).
 """
     refs = [r.convert("RGB") for r in (refs or []) if r is not None]
     if not refs:
@@ -4958,6 +4965,19 @@ def set_force_ratio_mode(mode):
     global FORCE_RATIO_MODE
     FORCE_RATIO_MODE = "extend" if str(mode or "").strip().lower() == "extend" else "crop"
     _log(f"force ratio mode -> {FORCE_RATIO_MODE}")
+
+
+def set_edit_size_from_settings(on):
+    """Edit (references): True = the output takes the Settings width / height (and so
+    the aspect ratio), False = Ref 1's own size. Said once per change."""
+    global EDIT_SIZE_FROM_SETTINGS
+    on = bool(on)
+    if on != EDIT_SIZE_FROM_SETTINGS:
+        EDIT_SIZE_FROM_SETTINGS = on
+        _log("edit output size -> " + ("the Settings width / height (the LoRA was trained "
+                                       "on same-size pairs: texts may hold less well)"
+                                       if on else "Ref 1's own size"))
+    return EDIT_SIZE_FROM_SETTINGS
 
 
 def _parse_ratio(spec):

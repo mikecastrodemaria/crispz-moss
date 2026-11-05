@@ -1486,6 +1486,16 @@ def _set_aspect(name):
     return w, h
 
 
+def _ui_set_edit_size(on):
+    """UI: the 'Output size from Settings' checkbox of the Edit (references) tab. Sets
+    the state in cz_pipeline and remembers it (preferences.json)."""
+    v = cz_pipeline.set_edit_size_from_settings(bool(on))
+    try:
+        _save_prefs_keys({"edit_size_from_settings": bool(v)})
+    except Exception as e:
+        _log(f"edit output size: preference not saved ({e})")
+
+
 def _ui_set_force_ratio(mode, aspect_name):
     """UI: the forced ratio for Upscale/img2img. 'Off' -> the native ratio is preserved;
     'Crop to fit' -> a center crop to the chosen Aspect ratio;
@@ -2621,7 +2631,9 @@ def _ui_generate(prompt, negative, styles, style_random, use_input, input_image,
         omni_ready = bool((cz_pipeline.OMNI_MODEL or "").strip())
         if use_input and input_mode == EDIT_MODE and omni_ready:
             refs = [r for r in [ref1, ref2, ref3, ref4] if r is not None]
-            _dbg(f"omni: {len(refs)} ref(s), size={int(width)}x{int(height)}")
+            honor_size = bool(cz_pipeline.EDIT_SIZE_FROM_SETTINGS)
+            _dbg(f"omni: {len(refs)} ref(s), size={int(width)}x{int(height)}"
+                 f"{' (Settings)' if honor_size else ' (ignored: Ref 1 size)'}")
             if not refs:
                 return _done([], "Edit: add at least one reference image.")
             # As in txt2img: an "Image number" batch (each image replays the
@@ -2642,7 +2654,8 @@ def _ui_generate(prompt, negative, styles, style_random, use_input, input_image,
                 t0 = time.time()
                 try:
                     img = cz_pipeline.retry_on_oom("omni", generate_omni, refs, full_prompt,
-                                                   full_negative, width, height, gen_steps, s)
+                                                   full_negative, width, height, gen_steps, s,
+                                                   honor_size=honor_size)
                 except Exception as e:
                     _log(f"omni error: {e}")
                     # The images already produced stay displayed and saved.
@@ -4840,7 +4853,8 @@ def build_ui():
                                 with gr.Column(scale=3, min_width=340):
                                     gr.Markdown(
                                         "*Edit an image from an instruction: put it in **Ref 1** "
-                                        "(the result takes its size). Say what to change and what "
+                                        "(the result takes its size, unless **Output size from "
+                                        "Settings** below is ticked). Say what to change and what "
                                         "to keep, e.g. *Change the background to a sunny beach, "
                                         "preserving the logo.* This runs the community "
                                         "**Moss-Image-Edit LoRA** on the base model (fetched "
@@ -4916,6 +4930,16 @@ def build_ui():
                                              "this stays hidden.")
                                 with gr.Column(scale=1, min_width=260):
                                     edit_speed_status = gr.Markdown("", elem_classes="cz-omni-status")
+                            omni_size_cb = gr.Checkbox(
+                                value=bool(cz_pipeline.EDIT_SIZE_FROM_SETTINGS),
+                                label="Output size from Settings",
+                                info="Off = the result takes Ref 1's size and ratio (what the "
+                                     "Moss-Image-Edit LoRA was trained on: same-size pairs, the "
+                                     "texts held exact on the 5090). On = the Width / Height "
+                                     "and Aspect ratio of Settings are used instead: Ref 1 is "
+                                     "read at its own size and the model redraws it at the new "
+                                     "one, so texts and fine detail may hold less well. "
+                                     "Remembered.")
                             omni_edit_btn = gr.Button("Edit (Ref 1 + prompt -> image)",
                                                       variant="primary", elem_classes="cz-omni-edit-btn")
 
@@ -5780,6 +5804,7 @@ def build_ui():
                   outputs=_gen_outputs, show_progress_on=[report])
         # The Edit (references) tab's Edit button: same inputs/outputs, forced routing.
         omni_edit_btn.click(_ui_edit_generate, inputs=_gen_inputs, outputs=_gen_outputs)
+        omni_size_cb.change(_ui_set_edit_size, [omni_size_cb], None)
         if JOB_QUEUE_ENABLED:
             _q_panel = [queue_state, queue_sel, queue_md, queue_add_btn]
             queue_add_btn.click(_ui_queue_add, [*_gen_inputs, queue_state], _q_panel)

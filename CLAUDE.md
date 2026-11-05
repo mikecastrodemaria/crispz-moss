@@ -1332,6 +1332,26 @@ Mike, sur `main` 1.0.0 : console du navigateur `SyntaxError: Unexpected token '(
   1,2 Go, la ligne de licence au log).
 - Le preset DMD reste à juger sur images chez Mike.
 
+### « Output size from Settings » dans l'onglet Edit (05/11/2026, demande de Mike)
+
+Comme dans crispz-klein : une case pour que le résultat d'une édition prenne la taille et
+le ratio des Settings au lieu de ceux de Ref 1.
+- Le moteur le savait déjà (`generate_omni(..., honor_size=True)`, utilisé par le
+  protocole quand la spec porte `size_explicit`) ; l'UI ne le proposait pas.
+- `cz_pipeline.EDIT_SIZE_FROM_SETTINGS` (préférence `edit_size_from_settings`, défaut
+  config false) + `set_edit_size_from_settings` (dit une fois par changement) ;
+  `cz_ui._ui_set_edit_size` (case « Output size from Settings » sous les LoRAs d'édition,
+  aide : Ref 1 à sa taille = ce que la LoRA a appris, paires de même taille ; la taille
+  des Settings redessine l'image à une autre taille, textes et détails à relire) ;
+  le chemin Generate / bouton Edit passe `honor_size=` selon la case, ligne `omni:`
+  du log qui dit « (Settings) » ou « (ignored: Ref 1 size) ». Le protocole garde sa
+  règle par spec, jamais ce drapeau. README, config-sample, CHANGELOG.
+- Tests : `test_edit_output_size_switch` (`test_flux3_wiring` : off = taille de Ref 1
+  quoi que disent les Settings, on = taille des Settings, préférence sauvée, dit une
+  fois, défaut protocole intact) ; `test_local_tools` : la case est offerte, décochée.
+- Non mesuré sur la carte : la qualité des textes quand la taille change (attendu moins
+  bonne, lot 4b : la LoRA a été entraînée sur des paires de même taille).
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
