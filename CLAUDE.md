@@ -1361,6 +1361,9 @@ le ratio des Settings au lieu de ceux de Ref 1.
   trois modes de l'éditeur, presets d'upscale et tuiles, détailleur, le layout placé
   en outpaint, ce qu'il faut attendre en temps et en VRAM), à partir des mesures des
   lots 3, 3b, 4 et 7 d'Ideogram.
+- Mike ne trouvait pas le catalogue : l'accordéon est dans le panneau Advanced, onglet
+  Save, sous le bloc Asset Browser (à côté de « Open Asset Browser »), pas sous le
+  prompt comme je l'avais dit. README corrigé (« Generate tab » était faux).
 
 ## 10. Sources
 
