@@ -330,12 +330,20 @@ def test_outpaint_and_reframe_place_the_draft_and_guard_the_new_areas():
         assert cz_caption.is_compiled(d) and "no other text" in d["summary"]["caption"].lower()
         assert w > h and CALLS[-1]["width"] == w                        # the canvas grew to the right
         lay, _, _ = cz_caption.from_text(text, w, h)
+        bands = []
         for it in lay["items"]:
             x0, y0, x1, y1 = cz_caption.bbox_to_pixels(it["bbox"], w, h)
+            if it.get("caption") == cz_moss.MARGIN_CAPTION:
+                bands.append((x0, x1))
+                continue
             assert x1 <= place[2] + 3, (it, x1, place)
+        # the new band on the right is declared as an empty-background item
+        assert len(bands) == 1 and bands[0][1] == w and bands[0][0] <= place[2] + 3, (bands, place)
         _run(lambda: P.reframe(_img(256, 256), 16, 9, "contain", "a plain poster", 3, 1))
         place, (text, _, _, _) = made[-1]
-        assert place is not None and text.endswith("No other text.")
+        assert place is not None and "No other text." in text
+        assert "The added area on the left, right" in text
+        assert text.endswith("is plain empty background, no text, no letters, no objects.")
     finally:
         cz_moss.prepare_prompt = real
 

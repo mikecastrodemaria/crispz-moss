@@ -682,6 +682,34 @@ class EditPrefix:
 
 
 NO_OTHER_TEXT = "no other text"
+MARGIN_CAPTION = ("plain empty background continuing the picture's background colour and "
+                  "texture, nothing drawn here, no text, no letters, no objects")
+
+
+def margins_of(place, width, height):
+    """The new areas of an outpaint / reframe canvas: [(side, [x1, y1, x2, y2])] for each
+    band at least 16 px wide around the `place` rectangle of the source image."""
+    px0, py0, px1, py1 = [int(round(v)) for v in place]
+    w, h = int(width), int(height)
+    out = []
+    if px0 >= GRID:
+        out.append(("left", [0, 0, px0, h]))
+    if w - px1 >= GRID:
+        out.append(("right", [px1, 0, w, h]))
+    if py0 >= GRID:
+        out.append(("top", [max(0, px0), 0, min(w, px1), py0]))
+    if h - py1 >= GRID:
+        out.append(("bottom", [max(0, px0), py1, min(w, px1), h]))
+    return out
+
+
+def _margin_sentence(place, width, height):
+    sides = [s for s, _ in margins_of(place, width, height)]
+    if not sides:
+        return ""
+    where = sides[0] if len(sides) == 1 else ", ".join(sides[:-1]) + " and " + sides[-1]
+    return (f"The added area on the {where} is plain empty background, no text, no "
+            f"letters, no objects.")
 
 
 def _with_no_other_text(caption):
@@ -714,7 +742,12 @@ def prepare_prompt(prompt, width=None, height=None, fit=False, place=None):
     if not cz_caption.is_caption(prompt):
         if place is not None and prompt.strip():
             guarded = _with_no_other_text(prompt)
-            note = None if guarded == prompt.strip() else "outpaint: \"No other text.\" added to the prompt (plain text invents words in the new areas)"
+            extra = _margin_sentence(place, width, height) if width and height else ""
+            if extra and extra not in guarded:
+                guarded = guarded + " " + extra
+            note = None if guarded == prompt.strip() else ("outpaint: \"No other text.\" and the new areas "
+                                                           "declared as empty background in the prompt "
+                                                           "(plain text invents words there)")
             return guarded, width, height, note
         return prompt, width, height, None
     d = cz_caption.parse(prompt)
@@ -730,10 +763,17 @@ def prepare_prompt(prompt, width=None, height=None, fit=False, place=None):
                               min(max(0, b[2] + px0), int(width)), min(max(0, b[3] + py0), int(height))]
         draft["width"], draft["height"] = int(width), int(height)
         draft["summary"]["caption"] = _with_no_other_text(draft["summary"].get("caption", ""))
+        # The new bands are DECLARED, each as an empty-background item with its box:
+        # with the summary alone the model extended the headline across them at canvas
+        # scale (lot 3b on the 5090: "GRAN ... NING" around the kept poster).
+        margins = margins_of((px0, py0, px1, py1), width, height)
+        for side, box in margins:
+            draft["items"].append({"label": "object", "caption": MARGIN_CAPTION, "bbox": box})
         compiled, cw, ch = cz_caption.compile(draft)
         return compiled, cw, ch, (f"layout drawn for {dw}x{dh}: placed on the source image at "
                                   f"({px0}, {py0}) to ({px1}, {py1}) of the {int(width)}x{int(height)} "
-                                  f"canvas, \"no other text\" around it")
+                                  f"canvas, \"no other text\" and {len(margins)} empty-background "
+                                  f"item(s) around it ({', '.join(s for s, _ in margins) or 'none'})")
     if cz_caption.is_compiled(d):
         gw, gh = cz_caption.guess_canvas(d)
         if width and height and (gw > int(width) or gh > int(height)):

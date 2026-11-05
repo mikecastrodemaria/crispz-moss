@@ -1083,6 +1083,31 @@ Lecture :
   leur taille) ; juger les textes de l'étape 0 contre ce premier passage et contre
   l'étape 3 (1024), et les temps.
 
+### Deuxième passage du lot 3b (05/11/2026, Mike, 08:52) : outpaint et reframe lus, pic inchangé
+
+`gpu_lot3_check.py --skip-draft` après le réordonnancement texte / VAE du lot 4b :
+- **Pic inchangé** : 23,48 Go au premier img2img, le même chiffre à la décimale qu'avant le
+  réordonnancement. Le pic n'est donc PAS la phase VAE mais l'encodage du texte lui-même :
+  l'encodeur bf16 (16,8 Go) plus ses temporaires sur un prompt layout long (noyaux GDN en
+  repli torch, float32), 6 à 7 Go. Le DiT est bien garé (sinon 30 Go). C'est le plancher de
+  l'encodeur bf16 sur un prompt neuf ; en dessous, seule la voie nf4 (21 Go constants,
+  verdict sur images toujours en attente). Le réordonnancement a gagné 14 s sur le premier
+  rendu (79,7 s contre 93,7), le reste est identique. Pour trancher au prochain run, le
+  pipeline écrit une ligne `vram:` par appel avec image (réservé et pic après le texte,
+  puis après l'encodage VAE).
+- **Outpaint à droite (draft placé)** : l'affiche d'origine intacte, textes exacts ; dans la
+  bande neuve plus aucun charabia, mais « ING » en haut et « | PAIN » en bas, à la hauteur
+  exacte du titre et du sous-titre. **Reframe 16:9 (draft placé)** : l'affiche centrée
+  intacte ; dans les bandes latérales « GRAN » / « NING » et « SATURD » / « DU PAIN » en
+  lettres géantes. Lecture : le modèle rend les textes du layout à l'échelle du CANEVAS
+  (« GRAN[D OPE]NING » dont le milieu est recouvert par la zone gardée), les boîtes placées
+  ne suffisent pas à le confiner. L'init des bandes n'y est pour rien (strength 1,0 :
+  bruit pur). **Correctif** : chaque bande neuve est DÉCLARÉE dans le layout comme un
+  élément `object` à sa boîte (« plain empty background ..., no text, no letters, no
+  objects », `cz_moss.MARGIN_CAPTION`, `margins_of`), et un prompt texte libre reçoit la
+  phrase équivalente qui nomme les côtés. Tests : `test_caption`, `test_moss_wiring`.
+  À remesurer sur les mêmes rendus.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

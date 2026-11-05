@@ -99,8 +99,11 @@ included, no banding; the bakery poster in 25 s against 56 s.
   the magic prompt, then fix the texts in the editor.
 - The model keeps the text before the box: a box drawn too small is overflowed, the
   words stay whole.
-- Outpaint and reframe from a plain-text prompt fill the new area with invented text: a
-  layout placed on the original image (lot 3b) is the fix.
+- Outpaint and reframe: from a plain-text prompt the new area fills with invented text;
+  with a layout placed on the original image (lot 3b) the gibberish goes, but the model
+  still continued the headline across the new bands at canvas scale. Each new band is
+  now declared as an empty-background item of the layout (and named in a plain prompt):
+  to be measured.
 - Inpaint: describe the whole picture, not only the patch.
 
 ## Editing with references

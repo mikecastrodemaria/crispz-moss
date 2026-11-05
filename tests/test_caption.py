@@ -237,19 +237,35 @@ def test_prepare_prompt_places_a_draft_on_the_source_image():
     assert C.is_compiled(d)
     lay, lw, lh = C.from_text(text, 1536, 1024)
     assert (lw, lh) == (1536, 1024)
-    for it in lay["items"]:
+    own = [it for it in lay["items"] if it.get("caption") != cz_moss.MARGIN_CAPTION]
+    bands = [it for it in lay["items"] if it.get("caption") == cz_moss.MARGIN_CAPTION]
+    for it in own:
         x0, y0, x1, y1 = C.bbox_to_pixels(it["bbox"], 1536, 1024)
         assert x1 <= 1024 + 2 and y1 <= 1024 + 2, (it["text"], x0, y0, x1, y1)   # inside the source
     assert "no other text" in d["summary"]["caption"].lower()
+    # the new band is DECLARED as an empty-background item covering it (lot 3b, second pass)
+    assert len(bands) == 1 and bands[0]["label"] == "object" and not bands[0].get("text")
+    bx = C.bbox_to_pixels(bands[0]["bbox"], 1536, 1024)
+    assert abs(bx[0] - 1024) <= 1 and bx[1:] == (0, 1536, 1024), bx      # a pixel of play
+    assert "1 empty-background item(s) around it (right)" in note
     # reframe contain: the source reduced to 768 square, centred in 1376x768
-    text, w, h, _ = cz_moss.prepare_prompt(draft, 1376, 768, fit=True, place=(304, 0, 1072, 768))
+    text, w, h, note = cz_moss.prepare_prompt(draft, 1376, 768, fit=True, place=(304, 0, 1072, 768))
     lay, _, _ = C.from_text(text, 1376, 768)
-    xs = [C.bbox_to_pixels(it["bbox"], 1376, 768) for it in lay["items"]]
+    own = [it for it in lay["items"] if it.get("caption") != cz_moss.MARGIN_CAPTION]
+    bands = [C.bbox_to_pixels(it["bbox"], 1376, 768) for it in lay["items"]
+             if it.get("caption") == cz_moss.MARGIN_CAPTION]
+    xs = [C.bbox_to_pixels(it["bbox"], 1376, 768) for it in own]
     assert all(304 - 2 <= b[0] and b[2] <= 1072 + 2 for b in xs), xs
-    # plain text: the guard is appended once
-    t, _, _, note = cz_moss.prepare_prompt("a bakery poster", 1376, 768, fit=True, place=(0, 0, 10, 10))
-    assert t == "a bakery poster. No other text." and "No other text" in note
-    t2, _, _, note2 = cz_moss.prepare_prompt(t, 1376, 768, fit=True, place=(0, 0, 10, 10))
+    assert len(bands) == 2 and "(left, right)" in note
+    assert abs(bands[0][2] - 304) <= 1 and bands[0][0] == 0 and abs(bands[1][0] - 1072) <= 1
+    assert cz_moss.margins_of((0, 0, 1376, 768), 1376, 768) == []          # nothing new: no item
+    assert cz_moss.margins_of((0, 100, 1376, 668), 1376, 768) == [("top", [0, 0, 1376, 100]),
+                                                                  ("bottom", [0, 668, 1376, 768])]
+    # plain text: the guard and the bands, appended once
+    t, _, _, note = cz_moss.prepare_prompt("a bakery poster", 1376, 768, fit=True, place=(0, 0, 1024, 768))
+    assert t == ("a bakery poster. No other text. The added area on the right is plain empty "
+                 "background, no text, no letters, no objects.") and "No other text" in note
+    t2, _, _, note2 = cz_moss.prepare_prompt(t, 1376, 768, fit=True, place=(0, 0, 1024, 768))
     assert t2 == t and note2 is None
     # without place, fit still stretches (img2img of the whole image)
     text, w, h, note = cz_moss.prepare_prompt(draft, 1536, 1024, fit=True)
