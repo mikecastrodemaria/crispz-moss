@@ -119,6 +119,85 @@ included, no banding; the bakery poster in 25 s against 56 s.
   to be measured.
 - Inpaint: describe the whole picture, not only the patch.
 
+## Performance presets: MOSS, Draft, Draft with the DMD LoRA
+
+The **Performance** radio of Settings sets the steps and the CFG in one click (and, for
+the third one, a LoRA). Measured on the RTX 5090 on the poster preset (1152x1632):
+
+| preset | steps / CFG | what it is for | time (prompt already encoded) |
+|---|---|---|---|
+| **MOSS (50 steps)** | 50 / 3.0 | the official settings, the final render | about 85 s (110 s with the first encoding) |
+| **Draft (12 steps)** | 12 / 3.0 | a quick look on the base model: the texts held at 12 steps on every poster measured, the composition and the details may move against the 50-step render of the same seed | about 18 to 22 s |
+| **Draft (8 steps, DMD LoRA)** | 8 / 1.0 + LoRA | the lodestones 8-step DMD adapter in LoRA slot 1 at 1.0, CFG 1 (one DiT pass per step, no negative branch): a clean, complete image with exact texts on the measured seed | about 9 s of render |
+
+How the DMD preset gets its LoRA: it looks in the LoRA folders first (under its stable
+name `moss-dmd-8-steps.safetensors`, or under the Hub's generic `lora.safetensors` when
+the file's header is the DMD one), otherwise it fetches it once from
+`lodestones/MOSS-Image-SFT-8-steps-dmd` (1.2 GB, Apache 2.0) into `loras/_hf-edit/`,
+the licence written in the log. Pick another preset and the LoRA leaves slot 1 again;
+your own LoRAs in the other slots are untouched. Should the download fail, the preset
+falls back to Draft (12 steps) and says so. The XYZ "Performance" axis and the CLI
+apply the same rule. Note: the DMD author's full recipe also replaces the time
+embedding and samples with its own loop; only the LoRA is used here, and it held on
+images. A `config.txt` that copied `performance_presets` keeps its own list: add the
+line `"Draft (8 steps, DMD LoRA)": [8, 1.0, "moss-dmd-8-steps"]` or drop the key.
+
+The steps and the CFG stay editable after a preset (the sliders below the radio); a
+preset is just a starting point. Guidance 3 is the official value, 3 to 6 advised, raise
+it for a short plain-text prompt.
+
+## img2img, inpaint, outpaint, reframe and upscale: emulated
+
+MOSS-Image ships one pipeline, text to image. Everything below is **emulated** by the
+app on top of it (SDEdit on the tail of the model's own schedule, the image encoded by
+the same VAE; latent blending under a mask), and the family protocol announces it as
+such (`supports.emulated`). Measured on the 5090 on the lot 2 poster (1152x1632), offload
+"model": img2img 0.3 in 55 s and 0.6 in 52 s (texts exact, poster intact), inpaint 43 to
+47 s, outpaint one side 47 s, reframe 16:9 46 s, refine at 12 steps 8 s.
+
+**Where**: the **Input Image** panel of the Generate tab (tick "Input Image"), one tab
+per tool. The prompt box is the prompt of the edit: describe the whole picture, not only
+the patch; with a layout, keep it (it follows the image, see below).
+
+- **Upscale or img2img**: load an image. **ESRGAN upscale** (factor, model) then
+  **Refine (img2img)** at a denoise: the denoise is the fraction of the schedule that
+  runs (0.3 = the last 15 of 50 steps), 0 skips the refine (ESRGAN only). The **Use
+  case presets** (Photo, Subtle, Detailed, Portrait, 4K tiled, Low VRAM) set factor,
+  denoise, steps and tiles; the 12 to 16 step counts were measured against 36 (same
+  images to the eye, 53 % slower). **Vary (subtle)** and **Vary (strong)** are a plain
+  img2img at 0.25 and 0.6 on the loaded image. Large outputs run in **tiles** (ESRGAN
+  tiles and diffusion tiles with an overlap): the 4K preset renders 2880x4096 under
+  18 GB with no visible seam. **Force aspect ratio** (Settings) crops or extends the
+  loaded image to the chosen ratio before the pass.
+- **Inpaint / Outpaint**, one editor for three modes:
+  - **Brush (inpaint)**: paint the area to redo. The mask is max-pooled on the 16 px
+    grid of the latents; outside it the original is kept pixel for pixel (checked by the
+    GPU end-to-end test), the seams are blended. A full-white mask is a plain img2img.
+  - **Expand sides (outpaint)**: tick Left / Right / Top / Bottom (about 30 % each) or
+    **Center (all sides)**. The new bands start from pure noise under the mask.
+  - **Reframe**: a **Target ratio** and a **Fit** (contain = the whole image kept, bands
+    added; cover = cropped). Same machinery as outpaint.
+  Inpaint, outpaint and reframe work on an area capped near 1 Mpx and paste the result
+  back at the original size, so they run faster than a full 1.9 Mpx render.
+- **Detail faces / Detail hands** (Advanced): after a render or an upscale, detect the
+  faces (and hands), inpaint each at its own denoise, paste back with a feathered edge.
+  Measured: a face retouched (teeth, eyes) with the rest of the poster untouched.
+- **Upscale after generate**: chains each txt2img image through the upscale pipeline
+  with no manual step; works after an edit too.
+
+**Layouts and the emulated tools.** A layout is written for one size. In img2img,
+inpaint and refine it is rescaled to the image. In outpaint and reframe it is **placed**
+on the original image inside the new canvas (never stretched), the new bands are
+declared in it as empty-background items and "No other text." is forced; a plain-text
+prompt gets the same sentence naming the sides. This came from measurements: with a
+plain prompt the new areas filled with invented words, with the stretched layout the
+headline continued across the bands. The log says what it did.
+
+**What to expect.** The first render after a new prompt costs 30 to 40 s more than the
+others (the text encoder comes to the card and leaves again, the DiT is parked in RAM
+meanwhile) and peaks at 19 to 23.5 GB depending on the prompt's length; the next ones
+stay near 15 GB. Stop renders the partial image within a second or two.
+
 ## Editing with references
 
 Two ways, both local.

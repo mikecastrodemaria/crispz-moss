@@ -1355,6 +1355,12 @@ le ratio des Settings au lieu de ceux de Ref 1.
   suivre (téléchargement de l'index, onglets Characters et Styles, vignettes depuis le
   Hub ou rendus en local, « Send to crispz-moss », autocomplétion, avis de droits) ;
   hide1 ajouté aux crédits. Le README n'en avait qu'une ligne de tableau.
+- README (demande de Mike, suite) : sections « Performance presets: MOSS, Draft, Draft
+  with the DMD LoRA » (tableau steps / CFG / usage / temps, d'où vient la LoRA, repli,
+  config.txt) et « img2img, inpaint, outpaint, reframe and upscale: emulated » (où, les
+  trois modes de l'éditeur, presets d'upscale et tuiles, détailleur, le layout placé
+  en outpaint, ce qu'il faut attendre en temps et en VRAM), à partir des mesures des
+  lots 3, 3b, 4 et 7 d'Ideogram.
 
 ## 10. Sources
 
