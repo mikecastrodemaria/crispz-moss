@@ -255,8 +255,8 @@ its tags and its facets: hair, eyes, gender, outfit) is browsable from the app. 
 is fetched until you ask for it, and nothing leaves the machine but the downloads you
 click.
 
-1. **Advanced panel (tick "Advanced"), tab "Save", under the Asset Browser block:
-   accordion "Character catalog (MOSS-Image, 34,249 samples)"** (closed by default). Click
+1. **Advanced panel (tick "Advanced"), tab "Styles", under the style list: accordion
+   "Character catalog (MOSS-Image, 34,249 samples)"** (closed by default). Click
    **Download / update the catalog (7 MB, huggingface.co)**. The index lands in
    `cache/moss/`, the log writes a `CATALOG:` line, the status under the button says
    what is on disk. A second click only updates it.

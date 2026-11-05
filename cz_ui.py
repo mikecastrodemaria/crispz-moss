@@ -5101,6 +5101,39 @@ def build_ui():
                         gr.Markdown("*Hover a style to preview it.*")
                         styles = gr.CheckboxGroup(list(STYLES), value=CONFIG.get("default_styles", []),
                                                   label="Styles (combinable)", elem_id="cz_styles")
+                        with gr.Accordion("Character catalog (MOSS-Image, 34,249 samples)", open=False):
+                            gr.Markdown(
+                                "The MOSS-Image Character Catalog (hide1 on Hugging Face): 33,935 "
+                                "characters and 314 styles rendered with MOSS-Image, each with a "
+                                "reusable prompt, its tags and facets. Two tabs in the Asset Browser "
+                                "(Characters, Styles): search by name, copyright, hair, eyes, outfit; "
+                                "a click sends the prompt or the tags to the prompt box; the names "
+                                "join the prompt autocomplete. The catalog file (7 MB) is fetched "
+                                "from huggingface.co ONCE, on the button; the sample thumbnails stay "
+                                "there and load only with the option below (one request per "
+                                "thumbnail shown). **Uncurated, and the characters, artworks and "
+                                "images are third-party intellectual property: not for client "
+                                "deliverables** (the catalog's own notice).")
+                            with gr.Row():
+                                cat_thumbs_cb = gr.Checkbox(
+                                    value=bool(_prefs.get("catalog_remote_thumbs", False)),
+                                    label="Show thumbnails from huggingface.co",
+                                    info="Off: cards show the name only, nothing is fetched.")
+                                cat_dl_btn = gr.Button("Download / update the catalog (7 MB, huggingface.co)",
+                                                       size="sm")
+                            cat_status = gr.Markdown(_ui_catalog_status(DEFAULT_OUTPUT_DIR))
+                            gr.Markdown("The sample renders can be kept locally too (the Asset "
+                                        "Browser then shows them with nothing fetched afterwards): "
+                                        "the 280 px thumbnails are 34,249 files, about 270 MB; the "
+                                        "full renders about 1.8 GB. Parallel and resumable "
+                                        "(a second click only fetches what is missing), about an "
+                                        "hour each at the anonymous Hub rate (an hf_token in "
+                                        "config.txt raises it). Stored under cache/moss/character_catalog.")
+                            with gr.Row():
+                                cat_thumbs_btn = gr.Button("Download the thumbnails (34,249 files, ~270 MB)",
+                                                           size="sm")
+                                cat_images_btn = gr.Button("Download the full renders (~1.8 GB)",
+                                                           size="sm")
 
                     with gr.Tab("Prompt AI"):
                         gr.Markdown("### Caption model (Auto-describe)")
@@ -5429,39 +5462,6 @@ def build_ui():
                             ab_reindex_btn = gr.Button("Rebuild ALL thumbnails (force)", size="sm")
                         ab_open_link = gr.HTML("")
                         ab_status = gr.Markdown("")
-                        with gr.Accordion("Character catalog (MOSS-Image, 34,249 samples)", open=False):
-                            gr.Markdown(
-                                "The MOSS-Image Character Catalog (hide1 on Hugging Face): 33,935 "
-                                "characters and 314 styles rendered with MOSS-Image, each with a "
-                                "reusable prompt, its tags and facets. Two tabs in the Asset Browser "
-                                "(Characters, Styles): search by name, copyright, hair, eyes, outfit; "
-                                "a click sends the prompt or the tags to the prompt box; the names "
-                                "join the prompt autocomplete. The catalog file (7 MB) is fetched "
-                                "from huggingface.co ONCE, on the button; the sample thumbnails stay "
-                                "there and load only with the option below (one request per "
-                                "thumbnail shown). **Uncurated, and the characters, artworks and "
-                                "images are third-party intellectual property: not for client "
-                                "deliverables** (the catalog's own notice).")
-                            with gr.Row():
-                                cat_thumbs_cb = gr.Checkbox(
-                                    value=bool(_prefs.get("catalog_remote_thumbs", False)),
-                                    label="Show thumbnails from huggingface.co",
-                                    info="Off: cards show the name only, nothing is fetched.")
-                                cat_dl_btn = gr.Button("Download / update the catalog (7 MB, huggingface.co)",
-                                                       size="sm")
-                            cat_status = gr.Markdown(_ui_catalog_status(DEFAULT_OUTPUT_DIR))
-                            gr.Markdown("The sample renders can be kept locally too (the Asset "
-                                        "Browser then shows them with nothing fetched afterwards): "
-                                        "the 280 px thumbnails are 34,249 files, about 270 MB; the "
-                                        "full renders about 1.8 GB. Parallel and resumable "
-                                        "(a second click only fetches what is missing), about an "
-                                        "hour each at the anonymous Hub rate (an hf_token in "
-                                        "config.txt raises it). Stored under cache/moss/character_catalog.")
-                            with gr.Row():
-                                cat_thumbs_btn = gr.Button("Download the thumbnails (34,249 files, ~270 MB)",
-                                                           size="sm")
-                                cat_images_btn = gr.Button("Download the full renders (~1.8 GB)",
-                                                           size="sm")
 
                     with gr.Tab("Advanced"):
                         gr.Markdown("### Hugging Face access (gated models)")

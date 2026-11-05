@@ -1364,6 +1364,9 @@ le ratio des Settings au lieu de ceux de Ref 1.
 - Mike ne trouvait pas le catalogue : l'accordéon est dans le panneau Advanced, onglet
   Save, sous le bloc Asset Browser (à côté de « Open Asset Browser »), pas sous le
   prompt comme je l'avais dit. README corrigé (« Generate tab » était faux).
+- Déplacé sur proposition de Mike : l'accordéon du catalogue est désormais dans l'onglet
+  **Styles** du panneau Advanced, sous la liste des styles (le catalogue nourrit les
+  prompts : personnages et styles), plus dans Save. README mis à jour.
 
 ## 10. Sources
 
