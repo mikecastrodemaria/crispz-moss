@@ -97,7 +97,7 @@
         "steps": 50,
         "guidance": 3.0
     },
-    "_default_loras_help": "LoRAs applied at startup (in loras_dir). Names or [name, weight]. Empty = none. MOSS-Image LoRAs only, and NOT loadable before lot 4 (listed, refused with the reason); a FLUX or Ideogram LoRA is refused with its reason (different layers) and the studio that runs it.",
+    "_default_loras_help": "LoRAs applied at startup (in loras_dir). Names or [name, weight]. Empty = none. MOSS-Image LoRAs only (kohya, peft, moss-edit-lora and ComfyUI diff layouts, the fused qkv split; applied hot on the DiT by crispz-moss's own loader, keys that match nothing are counted in the log); a control LoRA that replaces a layer is refused by name, a FLUX or Ideogram LoRA with its reason (different layers) and the studio that runs it.",
     "default_loras": [],
     "_edit_loras_help": "Edit LoRA presets for the reference-edit path. Inactive on crispz-moss (no edit pipeline; local reference editing runs in crispz-flux3), and the built-in FLUX.3 'Outpaint' LoRA is refused by the family guard. The key stays for family parity.",
     "edit_loras": {},

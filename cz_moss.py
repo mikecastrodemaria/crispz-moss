@@ -515,7 +515,7 @@ class MossPipe:
 
     _OWN = {"_pipe", "repo", "variant", "_said", "_cfg", "_all_hooks", "_tr_pre",
             "_te_on_gpu", "_offload_device", "released", "_neg_cache", "skip_layers",
-            "_generator", "_lm_head", "_vl_processor", "_swap_dit", "_dit_parked"}
+            "_generator", "_lm_head", "_vl_processor", "_swap_dit", "_dit_parked", "_loras"}
 
     def __init__(self, pipe, repo=DEFAULT_REPO):
         object.__setattr__(self, "_pipe", pipe)
@@ -531,6 +531,7 @@ class MossPipe:
         object.__setattr__(self, "_te_on_gpu", False)
         object.__setattr__(self, "_swap_dit", False)
         object.__setattr__(self, "_dit_parked", False)
+        object.__setattr__(self, "_loras", [])
         object.__setattr__(self, "released", False)
         object.__setattr__(self, "skip_layers", tuple(UNCOND_SKIP_LAYERS))
 
@@ -574,11 +575,34 @@ class MossPipe:
         self._pipe.to(*args, **kwargs)
         return self
 
-    # --- LoRAs: lot 4 ---------------------------------------------------------------------
+    # --- LoRAs (lot 4): crispz-moss's own loader, cz_moss_lora ----------------------------
     def load_lora_weights(self, *a, **k):
         raise NotImplementedError(
-            "MOSS-Image LoRAs are not loadable yet (lot 4: the vendored pipeline has no "
-            "LoRA loader, crispz-moss brings its own, ComfyUI's fused-qkv layout included).")
+            "diffusers' LoRA API does not reach the vendored MOSS pipeline: crispz-moss "
+            "applies MOSS-Image LoRAs with its own loader, MossPipe.set_loras([(path, "
+            "weight), ...]) (kohya, peft, moss-edit-lora and ComfyUI diff layouts).")
+
+    def set_loras(self, wanted):
+        """Applies exactly `wanted` = [(path, weight), ...] on the DiT (the previous set
+        removed first; the same files with other weights are re-scaled in place).
+        Returns the loader's per-file summaries."""
+        import cz_moss_lora
+        wanted = [(str(p), float(w)) for p, w in (wanted or [])]
+        have = list(self.applied_loras)
+        tr = self.transformer
+        if wanted and [p for p, _ in have] == [p for p, _ in wanted]:
+            if cz_moss_lora.rescale(tr, [w for _, w in wanted]):
+                object.__setattr__(self, "_loras", wanted)
+                _log("LoRA weights updated in place: "
+                     + ", ".join(f"{os.path.basename(p)}@{w:g}" for p, w in wanted))
+                return []
+        reports = cz_moss_lora.apply(tr, wanted)
+        object.__setattr__(self, "_loras", wanted)
+        return reports
+
+    @property
+    def applied_loras(self):
+        return list(getattr(self, "_loras", None) or [])
 
     # --- 'model' offload = the TEXT ENCODER only -----------------------------------------
     # diffusers' enable_model_cpu_offload chains text_encoder -> transformer -> vae, each

@@ -1680,10 +1680,11 @@ def _lora_unsupported(path):
         return (f"{_FAMILY_LABEL.get(fam, fam)} LoRA - its layers do not exist in "
                 f"MOSS-Image, nothing would apply. It works in {home}")
     if fam == engine.FAMILY:
-        # Lot 1: the vendored pipeline has no LoRA loader and peft knows none of its
-        # modules; crispz-moss brings its own loader in lot 4 (ComfyUI's fused qkv too).
-        return ("MOSS-Image LoRAs are not loadable yet (lot 4 brings the loader); "
-                "listed, not applied")
+        # Lot 4: crispz-moss's own loader (cz_moss_lora) reads the kohya, peft,
+        # moss-edit-lora and ComfyUI diff layouts; what it refuses, it names (a control
+        # LoRA that replaces a layer, a file with no LoRA tensor at all).
+        import cz_moss_lora
+        return cz_moss_lora.refusal(path)
     algo = _lycoris_algo(path)
     if algo and algo != "LoKr":
         return (f"LyCORIS {algo} - only LoKr is supported here; peft recognises none "
@@ -3931,6 +3932,7 @@ def _lora_names(loras):
 
 def _clear_loras(pipe):
     """Removes EVERY LoRA adapter from the pipe to start from a clean state.
+    A MossPipe carries its own loader (hooks): its set is emptied, nothing else to do.
 
     unload_lora_weights() alone leaves, depending on the diffusers/peft versions, a residual
     peft_config on the transformer -> the next load warns ('Already found a peft_config')
@@ -3938,6 +3940,9 @@ def _clear_loras(pipe):
     place (the wrong LoRA applied). So the remaining adapters are deleted explicitly by name
     after the unload.
 """
+    if isinstance(pipe, engine.MossPipe):
+        pipe.set_loras([])
+        return
     try:
         pipe.unload_lora_weights()
     except Exception as e:
@@ -4277,11 +4282,48 @@ def _sync_adapters(pipe, wanted, applied, force=False, tag="LoRA"):
         return False, []
 
 
+def _apply_moss_loras(pipe, force=False):
+    """MOSS-Image: the adapter's own loader. The set wanted is LORAS minus the files the
+    guard refuses (each SKIPPED with its reason, never applied partially in silence)."""
+    global _APPLIED_LORAS, _LAST_LORA_ERROR
+    wanted = []
+    for p, w in LORAS:
+        if not os.path.isfile(p):
+            _log(f"LoRA file not found, ignored: {p}")
+            continue
+        why = _lora_unsupported(p)
+        if why:
+            _log(f"LoRA SKIPPED, {os.path.basename(p)}: {why}")
+            continue
+        wanted.append((p, float(w)))
+    if not force and wanted == list(pipe.applied_loras):
+        _APPLIED_LORAS = wanted
+        return True
+    try:
+        pipe.set_loras(wanted)
+    except Exception as e:
+        _LAST_LORA_ERROR = f"{type(e).__name__}: {e}"
+        _log(f"LoRA application failed ({_LAST_LORA_ERROR}); none applied")
+        try:
+            pipe.set_loras([])
+        except Exception:
+            pass
+        _APPLIED_LORAS = []
+        return False
+    _APPLIED_LORAS = wanted
+    if wanted:
+        _log("LoRAs applied on the DiT (hot, no model reload): "
+             + ", ".join(f"{os.path.basename(p)}@{w:g}" for p, w in wanted))
+    return True
+
+
 def _apply_loras(pipe, force=False):
     """BASE LoRAs (txt2img/img2img): synchronises the pipe with LORAS through
     _sync_adapters. Returns True when applied, False on a failure (the caller falls back to
     a full reload)."""
     global _APPLIED_LORAS
+    if isinstance(pipe, engine.MossPipe):
+        return _apply_moss_loras(pipe, force=force)
     # A LoKr is MERGED into the weights: it can be neither removed nor re-weighted
     # without starting again from the original transformer. As soon as the requested set
     # differs from the one already inside, we say so and hand over to a full reload.

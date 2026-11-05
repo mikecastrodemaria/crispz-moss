@@ -5,7 +5,7 @@ generate(). Also: get_pipe hands the one object back, the guidance slider and th
 negative prompt reach the adapter, the sampler is left alone, the live preview reads the
 (B, 128, h, w) latents, the protocol announces what lot 1 can and cannot do, the profile
 gives 50 steps / 3.0, a FLUX.3 or Ideogram LoRA is refused with the app it belongs to, a
-MOSS LoRA is refused by name until lot 4, and the checkpoint menu lists a ComfyUI /
+MOSS LoRA passes the guard (lot 4 loader), and the checkpoint menu lists a ComfyUI /
 CivitAI single file (bf16 and int8) and refuses the 4-bit one.
 Run: python -m pytest tests/test_moss_wiring.py -q
 """
@@ -180,15 +180,23 @@ def test_foreign_loras_are_refused_and_named():
     assert why and "crispz-ideogram" in why
 
 
-def test_a_moss_lora_is_refused_until_lot_4():
+def test_a_moss_lora_passes_the_guard_a_control_lora_does_not():
     path = _fake_safetensors([
         ("layers.0.proj.q.lora_A.weight", [64, 3072]),
         ("layers.0.proj.q.lora_B.weight", [3072, 64])])
     try:
+        assert P._lora_unsupported(path) is None
+    finally:
+        os.unlink(path)
+    path = _fake_safetensors([
+        ("layers.0.proj.q.lora_A.weight", [64, 3072]),
+        ("layers.0.proj.q.lora_B.weight", [3072, 64]),
+        ("video_embedder.weight", [3072, 384])])              # Comfy-Org colour / depth control
+    try:
         why = P._lora_unsupported(path)
     finally:
         os.unlink(path)
-    assert why and "lot 4" in why
+    assert why and "CONTROL" in why and "video_embedder" in why, why
 
 
 def test_checkpoint_menu_lists_comfy_files_and_refuses_4bit():

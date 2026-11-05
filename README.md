@@ -40,6 +40,7 @@ attached. The other crispz studios stay better at photos and editing.
 | **Vectorize (SVG)** | locally with vtracer: made for logos, icons and flat colours |
 | **Remove BG** | locally with rembg |
 | **Edit with references** | handed to **crispz-flux3** on the same machine (see below) |
+| **LoRAs** | MOSS-Image LoRAs in every published layout (kohya, peft, moss-edit-lora, ComfyUI diffs such as DeBand), applied hot by the app's own loader; what cannot apply is named, nothing is skipped in silence |
 | **The rest of the family** | styles, wildcards, X/Y/Z grids, job queue, Asset Browser, CivitAI search, face swap, detailer, CLI and the family protocol v1 (`czp`) |
 
 ## Requirements

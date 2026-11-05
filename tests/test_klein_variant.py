@@ -204,8 +204,8 @@ def test_a_lora_declares_its_variant_through_its_shapes():
 def test_a_foreign_lora_is_refused_in_one_sentence():
     """peft would otherwise dump forty lines of key mismatches, or match nothing in
     silence. A FLUX.2, FLUX.3 or Ideogram 4 LoRA is refused naming its studio; a MOSS
-    LoRA (layers.N.proj.q, 3072 wide) is refused by name too, until lot 4 brings the
-    loader (listed, never applied in silence)."""
+    LoRA (layers.N.proj.q, 3072 wide) passes the guard (lot 4: crispz-moss's own loader
+    applies it)."""
     why = P._lora_unsupported(_lora("lora_flux2.safetensors", 3072, layout="flux-original"))
     assert why and "FLUX.2" in why and "MOSS-Image" in why and "crispz-klein" in why, why
     assert "\n" not in why.strip(), "one sentence"
@@ -222,8 +222,7 @@ def test_a_foreign_lora_is_refused_in_one_sentence():
     p = os.path.join(TMP, "lora_moss.safetensors")
     save_file({"layers.0.proj.q.lora_A.weight": torch.zeros(8, 3072),
                "layers.0.proj.q.lora_B.weight": torch.zeros(3072, 8)}, p)
-    why = P._lora_unsupported(p)
-    assert why and "lot 4" in why, why
+    assert P._lora_unsupported(p) is None
     print("OK test_a_foreign_lora_is_refused_in_one_sentence")
 
 

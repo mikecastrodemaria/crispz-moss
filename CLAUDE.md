@@ -844,6 +844,55 @@ suivant » de Mike (04/11/2026), livrés sur `wip/moss-engine`, mesure GPU à fa
   --skip-draft` ; regarder le pic du premier img2img (attendu ~19 Go au lieu de 30), et
   `3_outpaint_right.png` / `4_reframe_16x9.png` (zones neuves sans texte inventé ?).
 
+### Lot 4 (05/11/2026) : chargeur de LoRA, livré sur `wip/moss-engine`, mesure GPU à faire
+
+Lancé sur « passe au step suivant » de Mike, après le lot 3b.
+- **Relevé des vraies LoRAs publiées** (en-têtes safetensors lus le 04/11/2026), quatre
+  dialectes :
+  | fichier | clés | alpha | particularité |
+  |---|---|---|---|
+  | `lodestones/MOSS-Image-SFT-8-steps-dmd` `lora.safetensors` (756 tenseurs, fp32) | kohya `diffusion_model.layers.N.proj.{q,k,v,o,ffn_up_gate,ffn_down}.lora_down/lora_up.weight` + `.alpha` | 128 par module, rang 128 | la recette DMD complète remplace aussi `time_embedding` et échantillonne avec sa boucle (lot 3) : ici la LoRA seule |
+  | `Comfy-Org/MOSS-Image` `loras/moss_image_color_depth_control` (526) | peft `layers.N.proj.*.lora_A/B.weight`, `text_embedder.blocks.N.*` | « alpha » global 64 dans les métadonnées | **remplace `video_embedder` (384 canaux d'entrée)** : un modèle de CONTRÔLE qui attend des cartes couleur et profondeur, refusé par nom |
+  | `Comfy-Org/MOSS-Image` `loras/moss_image_edit_lora_rank_64_bf16` et `chinoll/Moss-Image-Edit` `adapter_model` (504) | `layers.N.proj.*.lora_A` / `lora_B` SANS `.weight` | 64 par module dans `__metadata__.adapter_config` (format `moss-edit-lora`) | contrat `ref-prefix-only-t0__target-text-original-moss-v1` : les références entrent dans la séquence, voir l'étude plus bas |
+  | `MATLOWAI/MOSS-Image-SFT-DeBand` (3 fichiers, 40 à 84 tenseurs) | ComfyUI `diffusion_model.layers.N.<module>.diff` : différences de poids COMPLÈTES, normes (`norm1`, `norm2`, `q_norm`, `k_norm`) comprises | aucun | `proj.qkv.diff` fusionné [9216, 3072] (variante `_splitqkv` séparée) ; « remet » les couches 37 à 41 (puis 32 à 36) aux poids Base |
+- **`cz_moss_lora.py`** : lit les quatre dialectes (préfixes `diffusion_model.`,
+  `transformer.`, `base_model.model.`, `model.` retirés ; alpha par tenseur, sinon par
+  module via `adapter_config`, sinon global, sinon rang), scinde le `layers.N.proj.qkv`
+  fusionné de ComfyUI en q, k, v (le `text_embedder.blocks.N.qkv` est fusionné dans le
+  modèle, gardé tel quel). Application par **hooks forward** sur les Linear du DiT
+  (`y += scale * x A^T B^T`, `y += w * x D^T` pour un diff, décalage de sortie pour un
+  `diff_b`), delta en place sur les poids des normes avec restauration à la décharge ;
+  tenseurs enregistrés en buffers des modules (ils suivent le DiT entre la carte et la RAM
+  au swap du lot 3b). Poids de base jamais touchés, re-pondération en place sans
+  recharger (`rescale`, sauf quand un fichier porte des diffs de normes : réappliqué).
+  **Clés inconnues et modules absents comptés et dits** dans le log, jamais ignorés en
+  silence ; un fichier qui n'applique rien le dit. Refus nommés : LoRA de contrôle
+  (remplace une couche), fichier sans tenseur LoRA.
+- `MossPipe.set_loras([(chemin, poids)])` / `applied_loras` ; `load_lora_weights` refuse
+  en renvoyant vers `set_loras`. `cz_pipeline._apply_loras` route un MossPipe vers
+  `_apply_moss_loras` (fichiers refusés SAUTÉS avec la raison, absents ignorés, même
+  jeu = rien à refaire) ; `_clear_loras` vide le jeu ; `_lora_unsupported` laisse passer
+  une LoRA MOSS et nomme la LoRA de contrôle. Les menus LoRA de l'UI listent donc les
+  fichiers MOSS comme applicables.
+- Tests : `tests/test_moss_lora.py` (9 : classification, kohya alpha/rang, qkv fusionné
+  scindé + clés inconnues dites, moss-edit-lora à alpha par module, diffs sur Linear,
+  normes et biais avec décharge qui restaure, refus contrôle et fichier vide, rescale et
+  poids 0 = identité, rendu qui change puis revient sur le MossPipe, routage
+  cz_pipeline). Tests hérités mis à jour (le refus « lot 4 » devient un passage de garde,
+  la LoRA de contrôle refusée). Suite : 67 fichiers sur 67 + 1 nouveau.
+- `tools/gpu_lot4_check.py` : baseline (affiche, 50 steps), DeBand L37-41 à 1,0 (même
+  seed : rayures verticales parties ?), LoRA DMD seule à 8 steps CFG 1 et 12 steps CFG 3
+  (expérience : sans l'embedding de temps ni la boucle DMD), Draft 12 steps ; fichiers
+  téléchargés dans `loras/` (Apache 2.0 tous deux), temps et pics dans `bench/lot4/`.
+- **Point 3 du cahier (édition par références, `Moss-Image-Edit`)** : la LoRA se charge
+  (dialecte `moss-edit-lora`), mais sans la construction de séquence des nœuds ComfyUI
+  (références en préfixe à t = 0) elle ne sert à rien ; étude des nœuds en cours, voir
+  plus bas. Le code des nœuds est GPLv3 : à comprendre et réécrire, jamais à vendoriser
+  (l'app est CC BY-NC).
+- À faire chez Mike : `git pull`, carte libre, `.venv\Scripts\python tools\gpu_lot4_check.py`
+  (télécharge 2 LoRAs, 1,3 Go) ; juger `1_deband` contre `0_baseline` sur les aplats, et
+  les textes des rendus DMD.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

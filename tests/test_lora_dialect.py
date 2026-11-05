@@ -178,8 +178,8 @@ def test_a_real_peft_lora_still_passes():
 
 def _lora_file(name, dtype, scaled=True):
     """A fake LoRA of an UNKNOWN family (block names no guard recognises: a family the
-    guard refuses by name, MOSS included until lot 4, would never reach the dtype
-    check tested here), in the dtype asked for; `scaled` adds the factors."""
+    guard refuses by name would never reach the dtype check tested here; a MOSS LoRA
+    takes crispz-moss's own loader), in the dtype asked for; `scaled` adds the factors."""
     sd = {}
     for i in range(4):
         b = f"transformer.other_arch.{i}.attn.q"

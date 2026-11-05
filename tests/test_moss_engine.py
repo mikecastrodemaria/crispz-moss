@@ -3,7 +3,7 @@
 Lot 1: text to image through crispz's calling convention, the subclassed pipeline equal
 to the vendored one, callback and Stop, the negative prompt reaching the encoder (and
 cached), size fitting, the named refusals (editing, LoRAs
-until lot 4), the encoder-only offload, the family detection the LoRA and checkpoint
+through set_loras), the encoder-only offload, the family detection the LoRA and checkpoint
 guards rely on, and the ComfyUI / CivitAI single files (bf16 and int8 ConvRot, fused
 qkv) read back to the very same weights.
 Run: python -m pytest tests/test_moss_engine.py -q
@@ -103,7 +103,7 @@ def test_edit_and_lora_are_refused_by_name():
     with pytest.raises(NotImplementedError, match="crispz-flux3"):
         _pipe()(prompt="x", width=256, height=256, num_inference_steps=1,
                 image=Image.new("RGB", (8, 8)))
-    with pytest.raises(NotImplementedError, match="lot 4"):
+    with pytest.raises(NotImplementedError, match="set_loras"):
         _pipe().load_lora_weights("x.safetensors")
 
 

@@ -66,6 +66,12 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   stretching it; under the encoder-only offload the DiT steps aside to the RAM while a new
   prompt is encoded (`moss_encode_swap`, peak expected 19 GB instead of 30); the Draft
   preset is 12 steps.
+- **Lot 4, LoRAs** (2026-11-05): crispz-moss's own loader for MOSS-Image LoRAs (the
+  vendored pipeline has none): kohya, peft, moss-edit-lora and ComfyUI "diff" layouts,
+  the fused qkv split, applied as hooks on the DiT (base weights untouched, live
+  re-weighting, clean unload), keys that match nothing counted and said; a control LoRA
+  that replaces a layer is refused by name. `tools/gpu_lot4_check.py` measures DeBand and
+  the DMD LoRA on the card.
 
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
