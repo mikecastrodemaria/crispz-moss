@@ -495,11 +495,13 @@ CZ_JS = """
 
   // Fullscreen and the arrows are handled natively by the Gradio gallery
   // (preview / fullscreen). No custom lightbox (it would double up on click).
-}
 
-// --- "Send to crispz-moss" from the Asset Browser (its own tab): fills the prompt box
-// (or the negative) and tells Gradio. BroadcastChannel, localStorage as the fallback.
-(() => {
+  // --- "Send to crispz-moss" from the Asset Browser (its own tab): fills the prompt
+  // box (or the negative) and tells Gradio. BroadcastChannel, localStorage as the
+  // fallback. INSIDE this function: Gradio evaluates the whole string as ONE
+  // expression, a second statement after the arrow function is a syntax error that
+  // breaks every event handler of the page (the Advanced checkbox included).
+  (() => {
   let last = 0;
   function put(sel, text, mode) {
     const el = document.querySelector(sel);
@@ -524,7 +526,8 @@ CZ_JS = """
   window.addEventListener('storage', ev => {
     if (ev.key === 'cz_prompt_handoff' && ev.newValue) { try { apply(JSON.parse(ev.newValue)); } catch (e) {} }
   });
-})();
+  })();
+}
 """
 
 

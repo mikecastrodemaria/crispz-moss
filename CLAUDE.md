@@ -1308,6 +1308,30 @@ DMD LoRA) » accepté.
   depuis le commit du fork, a4c1a4f). Suite des travaux : depuis `main`, une branche par
   sujet.
 
+### Correctif après le pull de Mike (05/11/2026) : la case Advanced ne faisait plus rien
+
+Mike, sur `main` 1.0.0 : console du navigateur `SyntaxError: Unexpected token '('` dans
+`new AsyncFunction` de Gradio, et la case Advanced n'ouvrait plus le panneau de droite.
+- **Cause** : le pont « Send to crispz-moss » (catalogue, 04/11) avait été ajouté dans
+  `cz_assets.CZ_JS` APRÈS la fonction fléchée de la page, comme une deuxième instruction
+  `(() => {...})();`. Gradio évalue `Blocks(js=...)` comme UNE expression
+  (`new AsyncFunction('return (' + js + ')')`) : une fonction suivie d'une parenthèse
+  ne compile pas, et comme cette compilation précède l'installation des gestionnaires
+  d'événements, AUCUN ne l'était (Advanced, presets, tout). Le test Chromium du 04/11
+  avait chargé `CZ_JS` dans une page factice (compilé comme un script, où deux
+  instructions sont permises), pas à travers Gradio. Le 404 de `manifest.json` vu dans
+  la même console vient d'une extension du navigateur, sans effet.
+- **Correctif** : le pont replié à l'intérieur de la fonction. Test
+  `test_the_page_js_is_one_expression_gradio_can_evaluate` (`test_catalog`) : contrôle
+  de structure (une seule expression, accolades comptées hors chaînes et commentaires)
+  et compilation par node comme Gradio quand node est là ; vérifié rouge sur l'ancien
+  `CZ_JS`, vert sur le nouveau.
+- Vérifié dans Chromium à travers l'app construite (`build_ui().launch`) : aucune erreur
+  de console de l'app, la case Advanced ouvre le panneau, le preset « Draft (8 steps,
+  DMD LoRA) » passe steps à 8 et CFG à 1 et met la LoRA en slot 1 (téléchargée ici,
+  1,2 Go, la ligne de licence au log).
+- Le preset DMD reste à juger sur images chez Mike.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

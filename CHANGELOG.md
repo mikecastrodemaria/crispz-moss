@@ -110,6 +110,12 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   step, about 9 s of render for a 1.9 Mpx poster, texts exact. A LoRA that cannot be
   fetched falls back to Draft (12 steps), said.
 - **1.0.0**: `wip/moss-engine` merged into `main`, `APP_VERSION` 1.0.0.
+- **Fix, page JavaScript** (2026-11-05): the "Send to crispz-moss" bridge (catalog,
+  2026-11-04) had been appended AFTER the page's arrow function as a second statement;
+  Gradio evaluates `Blocks(js=...)` as one expression, so the page threw
+  `SyntaxError: Unexpected token '('` at load and none of the event handlers were
+  installed (the Advanced checkbox did nothing, nor the presets). The bridge now lives
+  inside the function; a test compiles the page JS the way Gradio does.
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
 

@@ -143,6 +143,59 @@ def test_the_spa_and_the_app_page_carry_the_bridge():
     assert "cz_prompt_handoff" in js and "new Event('input', {bubbles: true})" in js
 
 
+def _js_one_expression(js):
+    """True when `js` is ONE expression: an arrow function whose closing brace is the
+    last token. Comments and string literals are skipped when counting braces."""
+    i, depth, n, opened = 0, 0, len(js), False
+    while i < n:
+        c = js[i]
+        if js.startswith("//", i):
+            i = js.find("\n", i)
+            i = n if i < 0 else i
+            continue
+        if js.startswith("/*", i):
+            i = js.find("*/", i + 2) + 2
+            continue
+        if c in "'\"`":
+            j = i + 1
+            while j < n and js[j] != c:
+                j += 2 if js[j] == "\\" else 1
+            i = j + 1
+            continue
+        if c == "{":
+            depth += 1
+            opened = True
+        elif c == "}":
+            depth -= 1
+            if depth == 0 and opened:
+                return js[i + 1:].strip() == ""
+        i += 1
+    return False
+
+
+def test_the_page_js_is_one_expression_gradio_can_evaluate():
+    """Gradio evaluates Blocks(js=...) as ONE expression (new AsyncFunction('return (' +
+    js + ')')). A second statement appended after the arrow function (the bridge was one,
+    2026-11-05) is a SyntaxError that breaks every event handler of the page: no
+    Advanced panel, no preset, nothing. Checked structurally, and compiled by node when
+    it is installed."""
+    import json
+    import shutil
+    import subprocess
+    import cz_assets
+    js = cz_assets.CZ_JS.replace("__MAP__", json.dumps({"a": "b"}))
+    assert js.lstrip().startswith("() => {")
+    assert _js_one_expression(js), "a statement follows the arrow function"
+    assert not _js_one_expression("() => { a(); }\n(() => { b(); })();")   # the broken shape
+    node = shutil.which("node")
+    if node:
+        code = ("const js = require('fs').readFileSync(0, 'utf8');"
+                "const AF = Object.getPrototypeOf(async function(){}).constructor;"
+                "new AF('return (' + js + ')');")
+        r = subprocess.run([node, "-e", code], input=js, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+
+
 def test_the_ui_offers_the_catalog_accordion():
     import gradio as gr
     import cz_ui
