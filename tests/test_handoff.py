@@ -40,6 +40,37 @@ FAKE_CZP = textwrap.dedent('''
 ''')
 
 
+FAKE_IDEOGRAM = textwrap.dedent('''
+    import json, os, sys
+    from PIL import Image
+    args = sys.argv[1:]
+    mode = open("mode.txt").read().strip() if os.path.exists("mode.txt") else "running"
+    if args[0] == "caps":
+        inst = {"running": mode == "running", "url": "http://127.0.0.1:7862",
+                "tool": "crispz-ideogram"}
+        if mode == "clash":
+            inst = {"running": True, "url": "http://127.0.0.1:7860", "tool": "crispz-moss"}
+        print(json.dumps({"ok": True, "tool": "crispz-ideogram", "instance": inst}))
+        sys.exit(0)
+    spec = json.loads(sys.stdin.read())
+    open("last_call.json", "w").write(json.dumps({"args": args, "spec": spec}))
+    out = os.path.join(spec["out_dir"], "ideogram.png")
+    Image.new("RGB", (spec["width"], spec["height"]), (10, 20, 30)).save(out)
+    print(json.dumps({"ok": True, "tool": "crispz-ideogram", "images": [out],
+                      "seed_used": spec.get("seed", 7)}))
+''')
+
+
+@pytest.fixture
+def ideogram(tmp_path, monkeypatch):
+    d = tmp_path / "crispz-ideogram"
+    d.mkdir()
+    (d / "cz_protocol.py").write_text(FAKE_IDEOGRAM)
+    monkeypatch.setattr(H, "_python", lambda folder: sys.executable)
+    monkeypatch.setenv("CRISPZ_IDEOGRAM_DIR", str(d))
+    return d
+
+
 @pytest.fixture
 def flux3(tmp_path, monkeypatch):
     d = tmp_path / "crispz-flux3"
@@ -153,3 +184,56 @@ def test_the_tab_handler_uses_the_main_prompt_when_the_field_is_empty(flux3, tmp
     imgs, msg, _, _ = cz_ui._ui_handoff(None, None, None, None, "x", "", -1, [],
                                         str(tmp_path))
     assert imgs == [] and "drop the image" in msg
+
+
+
+def test_compare_renders_the_translated_layout_in_crispz_ideogram(ideogram, tmp_path, logs):
+    """Lot 5: the main prompt (a MOSS layout) goes to crispz-ideogram's protocol CLI as an
+    Ideogram 4 caption, same size and seed; the image comes back, the licence is said."""
+    import json
+    import cz_design
+    draft = cz_design.prompt_of("Logo (square)")
+    freed = []
+    imgs, res, route, caption, notes = H.compare(draft, 1024, 1024, seed=11, steps=48,
+                                                 output_dir=str(tmp_path / "out"),
+                                                 free_vram=lambda: freed.append(1))
+    assert route == "instance" and freed == []
+    call = json.loads((ideogram / "last_call.json").read_text())
+    assert call["args"] == ["gen", "--spec", "-"]
+    spec = call["spec"]
+    assert spec["op"] == "gen" and (spec["width"], spec["height"]) == (1024, 1024)
+    assert spec["seed"] == 11 and spec["steps"] == 48
+    assert spec["prompt"] == caption and "compositional_deconstruction" in json.loads(caption)
+    assert imgs[0].size == (1024, 1024)
+    assert any("non-commercial" in m for m in logs) and any(m.startswith("HANDOFF:") for m in logs)
+    assert os.path.isfile(os.path.join(spec["out_dir"], "ideogram_prompt.json"))
+    saved = json.load(open(os.path.join(spec["out_dir"], "handoff.json"), encoding="utf-8"))
+    assert saved["target"] == "crispz-ideogram" and saved["notes"] == notes
+    # plain text: no translation, a .txt copy; a closed app runs cold after our VRAM is freed
+    (ideogram / "mode.txt").write_text("closed")
+    imgs, res, route, caption, notes = H.compare("a bakery poster", 512, 256, seed=-1,
+                                                 output_dir=str(tmp_path / "out2"),
+                                                 free_vram=lambda: freed.append(1))
+    assert route == "cold" and freed == [1] and caption == "a bakery poster" and notes == []
+    call = json.loads((ideogram / "last_call.json").read_text())
+    assert call["args"][-1] == "--local" and "seed" not in call["spec"] and "steps" not in call["spec"]
+    assert os.path.isfile(os.path.join(call["spec"]["out_dir"], "ideogram_prompt.txt"))
+    # an instance that is this app is not taken for crispz-ideogram
+    (ideogram / "mode.txt").write_text("clash")
+    _, _, route, _, _ = H.compare("x", 512, 512, output_dir=str(tmp_path / "out3"))
+    assert route == "cold" and any("same port" in m for m in logs)
+
+
+def test_compare_status_and_setting_are_separate_from_flux3(tmp_path, monkeypatch):
+    monkeypatch.delenv("CRISPZ_IDEOGRAM_DIR", raising=False)
+    monkeypatch.setattr(H, "_prefs", {})
+    H.CONFIG.pop("crispz_ideogram_dir", None)
+    ok, why = H.status_of(H.IDEOGRAM)
+    assert not ok and "crispz_ideogram_dir" in why and "crispz-ideogram" in why
+    with pytest.raises(H.HandoffError, match="crispz_ideogram_dir"):
+        H.compare("x", 512, 512)
+    saved = {}
+    monkeypatch.setattr("cz_core._save_prefs_keys", lambda d: saved.update(d))
+    ok, why = H.save_setting(str(tmp_path), target=H.IDEOGRAM)
+    assert saved == {"crispz_ideogram_dir": str(tmp_path)} and not ok and "cz_protocol.py" in why
+    assert H.ideogram_dir() == str(tmp_path) and H.flux3_dir() != str(tmp_path)

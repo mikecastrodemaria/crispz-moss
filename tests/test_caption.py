@@ -271,3 +271,61 @@ def test_prepare_prompt_places_a_draft_on_the_source_image():
     text, w, h, note = cz_moss.prepare_prompt(draft, 1536, 1024, fit=True)
     assert "rescaled" in note and (w, h) == (1536, 1024)
 
+
+
+def test_to_ideogram_translates_a_layout_to_the_ideogram_4_caption_schema():
+    """Lot 5 (Compare in crispz-ideogram): a MOSS layout becomes an Ideogram 4 caption
+    (ideogram-oss/ideogram4 schema): key order, boxes kept on the same 0..1000 yxyx grid,
+    texts verbatim, uppercase hex, minified UTF-8; plain text goes through untouched."""
+    import json
+    import cz_design
+    import cz_moss
+    draft = cz_design.prompt_of("Logo (square)")
+    text, notes = C.to_ideogram(draft, 1024, 1024)
+    assert text == json.dumps(json.loads(text), separators=(",", ":"), ensure_ascii=False)
+    cap = json.loads(text)
+    assert list(cap) == [k for k in ("high_level_description", "style_description",
+                                     "compositional_deconstruction") if k in cap]
+    cd = cap["compositional_deconstruction"]
+    assert list(cd) == ["background", "elements"] and cd["background"]
+    lay, _, _ = C.from_text(draft)
+    texts = [it["text"] for it in lay["items"] if it["label"] == "text"]
+    got_texts = [e["text"] for e in cd["elements"] if e["type"] == "text"]
+    assert got_texts == texts and texts                          # verbatim, same order
+    for e in cd["elements"]:
+        order = ["type", "bbox", "text", "desc", "color_palette"] if e["type"] == "text" \
+            else ["type", "bbox", "desc", "color_palette"]
+        assert list(e) == [k for k in order if k in e], e
+        assert e["desc"]
+        if "bbox" in e:
+            assert len(e["bbox"]) == 4 and all(isinstance(v, int) and 0 <= v <= 1000 for v in e["bbox"])
+            y0, x0, y1, x1 = e["bbox"]
+            assert y0 < y1 and x0 < x1
+        for c in e.get("color_palette", []):
+            assert c == c.upper() and len(c) == 7 and c[0] == "#"
+    # the boxes are the editor's own (yxyx thousandths), not re-projected
+    first = next(it for it in lay["items"] if it.get("bbox"))
+    assert next(e for e in cd["elements"] if "bbox" in e)["bbox"] == [int(v) for v in first["bbox"]]
+    sd = cap.get("style_description")
+    if sd:
+        assert list(sd) == [k for k in ("aesthetics", "lighting", "medium", "art_style",
+                                        "color_palette") if k in sd]
+        assert "photo" not in sd and sd["medium"] == "graphic_design"
+        assert len(sd.get("color_palette", [])) <= 16
+    assert any("translated to the Ideogram 4 caption schema" in n for n in notes)
+    # a character item is said as such; an outpaint band item is an obj like any other
+    text2, _ = C.to_ideogram({"summary": {"caption": "a hero"}, "items": [
+        {"label": "character", "caption": "knight", "bbox": [10, 10, 500, 500]},
+        {"label": "text", "text": "", "caption": "empty text, dropped"},
+        {"label": "text", "text": "GO", "caption": ""}]}, 512, 512)
+    cap2 = json.loads(text2)
+    els = cap2["compositional_deconstruction"]["elements"]
+    assert [e["type"] for e in els] == ["obj", "text"]
+    assert els[0]["desc"] == "character: knight" and els[1]["desc"] == "text"
+    assert "style_description" not in cap2                      # no meta, no palette
+    # plain text and a compiled layout
+    assert C.to_ideogram("a bakery poster", 512, 512) == ("a bakery poster", [])
+    compiled, w, h = C.compile(C.parse(draft))
+    text3, _ = C.to_ideogram(compiled, w, h)
+    assert json.loads(text3)["compositional_deconstruction"]["elements"][0]["bbox"] == \
+        cap["compositional_deconstruction"]["elements"][0]["bbox"]

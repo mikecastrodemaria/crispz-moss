@@ -502,3 +502,76 @@ def validate(layout_or_text, width=None, height=None):
                 and it["text"] and not it["text"].strip():
             p.append(f"items[{i}].text: whitespace only")
     return p
+
+
+# --- Translation to the Ideogram 4 caption schema (lot 5, "Compare in crispz-ideogram") ---
+# Ideogram 4 reads JSON captions of its own (ideogram-oss/ideogram4, docs/prompting.md),
+# the schema crispz-ideogram's editor writes: high_level_description, an optional
+# style_description (aesthetics, lighting, medium, photo OR art_style, palette <= 16),
+# and compositional_deconstruction {background, elements [{type obj|text, bbox
+# [y0, x0, y1, x1] in 0..1000, (text,) desc, color_palette <= 5}]}. Key ORDER matters
+# there, hex is uppercase #RRGGBB, the text is minified UTF-8. Our boxes are already
+# yxyx in 0..1000 (the EDITOR form), so the translation is a re-labelling plus the
+# defaults Ideogram needs for the fields a MOSS layout has no word for.
+IDEOGRAM_STYLE_DEFAULTS = {"aesthetics": "clean layout", "lighting": "even lighting",
+                           "medium": "graphic_design", "art_style": "flat graphic design"}
+
+
+def to_ideogram(prompt_or_layout, width=None, height=None):
+    """-> (ideogram_caption_text, notes). A MOSS layout (DRAFT, COMPILED, dict) becomes an
+    Ideogram 4 caption (minified JSON) for the same canvas; plain text goes through as
+    it is (both studios take free text). `notes` says what the translation filled in."""
+    notes = []
+    if isinstance(prompt_or_layout, str):
+        if not is_caption(prompt_or_layout):
+            return prompt_or_layout, notes
+        layout, w, h = from_text(prompt_or_layout, width, height)
+    else:
+        layout, w, h = from_text(prompt_or_layout, width, height)
+    summary = layout.get("summary") or {}
+    caption = str(summary.get("caption") or "").strip()
+    meta = [str(m).strip() for m in (summary.get("meta") or []) if str(m).strip()]
+    pal, _ = parse_palette(summary.get("palette") or [], 16)
+    cap = {}
+    if caption:
+        cap["high_level_description"] = caption
+    if meta or pal:
+        sd = {"aesthetics": ", ".join(meta) if meta else IDEOGRAM_STYLE_DEFAULTS["aesthetics"],
+              "lighting": IDEOGRAM_STYLE_DEFAULTS["lighting"],
+              "medium": IDEOGRAM_STYLE_DEFAULTS["medium"],
+              "art_style": IDEOGRAM_STYLE_DEFAULTS["art_style"]}
+        if pal:
+            sd["color_palette"] = pal
+        cap["style_description"] = sd
+        notes.append("style_description filled with graphic-design defaults (lighting, "
+                     "medium, art_style): a MOSS layout has no word for them")
+    elements = []
+    for it in layout.get("items") or []:
+        label = str(it.get("label") or "object")
+        kind = "text" if label == "text" else "obj"
+        desc = str(it.get("caption") or "").strip()
+        text = str(it.get("text") or "")
+        if kind == "text" and not text:
+            continue
+        if kind == "obj" and not desc:
+            continue
+        el = {"type": kind}
+        b = parse_bbox(it.get("bbox"))
+        if b:
+            el["bbox"] = [int(v) for v in b]
+        if kind == "text":
+            el["text"] = text
+            el["desc"] = desc or "text"
+        else:
+            el["desc"] = (f"character: {desc}" if label == "character" else desc)
+        epal, _ = parse_palette(it.get("palette") or [], 5)
+        if epal:
+            el["color_palette"] = epal
+        elements.append(el)
+    cap["compositional_deconstruction"] = {
+        "background": caption or "plain background", "elements": elements}
+    if not caption:
+        notes.append("no summary caption: Ideogram's background set to 'plain background'")
+    notes.append(f"layout translated to the Ideogram 4 caption schema for {w}x{h}: "
+                 f"{len(elements)} element(s), boxes kept (same 0..1000 yxyx grid)")
+    return json.dumps(cap, separators=(",", ":"), ensure_ascii=False), notes

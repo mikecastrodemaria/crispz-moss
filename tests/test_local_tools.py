@@ -53,7 +53,8 @@ def test_the_edit_tab_and_input_mode_are_offered():
 def test_no_visible_flux3_or_ideogram_wording_in_the_ui():
     """The inherited FLUX.3 and Ideogram wording stays only in hidden components and
     comments (a visible mention of Ideogram is allowed only to name crispz-ideogram as
-    the studio that runs a refused file, or Ideogram LoRAs as refused)."""
+    the studio that runs a refused file, Ideogram LoRAs as refused, or Ideogram 4 as the
+    model the Compare in crispz-ideogram tab renders with, lot 5)."""
     import gradio as gr
     demo = cz_ui.build_ui()
     parents = {}
@@ -75,7 +76,8 @@ def test_no_visible_flux3_or_ideogram_wording_in_the_ui():
             v = getattr(b, attr, None)
             if not isinstance(v, str):
                 continue
-            plain = v.replace("crispz-ideogram", "").replace("Ideogram LoRAs", "")
+            plain = (v.replace("crispz-ideogram", "").replace("Ideogram LoRAs", "")
+                     .replace("Ideogram 4", ""))
             if "FLUX.3" in v or "FLUX 3" in v or "ideogram" in plain.lower():
                 bad.append(f"{type(b).__name__}.{attr}: {v[:80]}")
     assert not bad, bad

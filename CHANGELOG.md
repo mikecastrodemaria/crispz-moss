@@ -86,6 +86,13 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   text is encoded before any VAE encode so the encoder has left the card by then (the
   lot 3b peak), and the repo's scheduler config loads without diffusers' warning.
   `tools/gpu_lot4b_check.py`; tests `tests/test_moss_edit.py`.
+- **Lot 5, local tools and gateways** (2026-11-05): Remove BG (rembg) and Vectorize
+  (vtracer) kept as they were; the Edit in crispz-flux3 hand-over kept (native
+  multi-reference editing); new **Compare in crispz-ideogram** tab: the main prompt
+  rendered by crispz-ideogram at the same size and seed through its protocol v1 CLI, a
+  MOSS layout translated to the Ideogram 4 caption schema (`cz_caption.to_ideogram`),
+  the prompt as sent shown and saved, the non-commercial licence of Ideogram 4 said in
+  the tab, the log and the hand-off file. Setting `crispz_ideogram_dir`.
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
 

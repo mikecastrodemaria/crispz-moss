@@ -1723,6 +1723,38 @@ def _ui_handoff(image, r1, r2, r3, instruction, main_prompt, seed, history, outp
             + (f". Warnings: {'; '.join(warn[:3])}" if warn else ""), new_hist, new_hist)
 
 
+def _ui_compare_ideogram(main_prompt, width, height, seed, steps, history, output_dir,
+                         progress=gr.Progress(track_tqdm=True)):
+    """Compare in crispz-ideogram tab -> (gallery, status, translated prompt, history x2)."""
+    import cz_handoff
+    try:
+        seed = int(seed) if seed is not None else -1
+    except (TypeError, ValueError):
+        seed = -1
+    try:
+        imgs, res, route, caption, notes = cz_handoff.compare(
+            main_prompt, width, height, seed, steps, output_dir,
+            free_vram=cz_pipeline.free_vram)
+    except cz_handoff.HandoffError as e:
+        return [], f"**crispz-ideogram:** {e}", "", history, history
+    except Exception as e:
+        _log(f"compare failed: {type(e).__name__}: {e}")
+        return [], f"**crispz-ideogram:** {type(e).__name__}: {e}", "", history, history
+    new_hist = (imgs + list(history or []))[:200]
+    how = "its running app" if route == "instance" else "its own process (cold)"
+    warn = res.get("warnings") or []
+    shown = caption
+    try:
+        shown = json.dumps(json.loads(caption), indent=2, ensure_ascii=False)
+    except ValueError:
+        pass
+    return (imgs, f"Rendered by crispz-ideogram ({how}): `{os.path.basename(res['images'][0])}`. "
+            f"{cz_handoff.IDEOGRAM_LICENCE}."
+            + (f" Notes: {'; '.join(notes)}" if notes else "")
+            + (f" Warnings: {'; '.join(warn[:3])}" if warn else ""),
+            shown, new_hist, new_hist)
+
+
 def _ui_vectorize(image, preset, colors, remove_bg, save_mode, output_dir):
     """Vectorize (SVG) tab: local vtracer -> (preview html, svg file, status). The SVG is
     saved like the other outputs; in display mode a temporary file still lets it be
@@ -4579,12 +4611,14 @@ def build_ui():
                         with gr.Tab("Edit in crispz-flux3"):
                             import cz_handoff
                             _ho_ok, _ho_why = cz_handoff.status()
-                            gr.Markdown("*MOSS-Image does not edit. This sends the image and "
-                                        "the instruction to **crispz-flux3** on this "
-                                        "machine (protocol v1): through its app when it "
-                                        "runs, otherwise in its own process after "
-                                        "crispz-moss frees its VRAM. Nothing leaves "
-                                        "the machine. Up to 3 references.*")
+                            gr.Markdown("*Native multi-reference editing (MOSS-Image edits "
+                                        "only through the Moss-Image-Edit LoRA, Edit "
+                                        "(references) tab). This sends the image and the "
+                                        "instruction to **crispz-flux3** on this machine "
+                                        "(protocol v1): through its app when it runs, "
+                                        "otherwise in its own process after crispz-moss "
+                                        "frees its VRAM. Nothing leaves the machine. Up to "
+                                        "3 references.*")
                             with gr.Row():
                                 ho_dir = gr.Textbox(value=cz_handoff.flux3_dir(),
                                                     label="crispz-flux3 folder",
@@ -4603,6 +4637,35 @@ def build_ui():
                             ho_btn = gr.Button("Edit in crispz-flux3 (local)",
                                                variant="primary", size="sm",
                                                interactive=_ho_ok)
+
+                        with gr.Tab("Compare in crispz-ideogram"):
+                            _cmp_ok, _cmp_why = cz_handoff.status_of(cz_handoff.IDEOGRAM)
+                            gr.Markdown("*An A/B on demand: the **main prompt** (a MOSS layout "
+                                        "is translated to the Ideogram 4 caption schema, same "
+                                        "boxes, same size, same seed) is rendered by "
+                                        "**crispz-ideogram** on this machine (protocol v1): "
+                                        "through its app when it runs, otherwise in its own "
+                                        "process after crispz-moss frees its VRAM. Nothing "
+                                        "leaves the machine. **Ideogram 4 is non-commercial: "
+                                        "the result is a comparison, never a client "
+                                        "deliverable.** Ports: both apps start on 7860, the "
+                                        "second one takes 7861; set `cli_protocol.instance_url` "
+                                        "in crispz-ideogram's config to the port its app "
+                                        "really uses.*")
+                            with gr.Row():
+                                cmp_dir = gr.Textbox(value=cz_handoff.ideogram_dir(),
+                                                     label="crispz-ideogram folder",
+                                                     placeholder=r"D:\Github\crispz-ideogram",
+                                                     scale=4)
+                                cmp_save = gr.Button("Save", size="sm", scale=1)
+                            cmp_status = gr.Markdown(("Ready: " if _cmp_ok else "**Off:** ")
+                                                     + _cmp_why)
+                            cmp_btn = gr.Button("Render the main prompt in crispz-ideogram "
+                                                "(local, comparison only)",
+                                                variant="primary", size="sm",
+                                                interactive=_cmp_ok)
+                            cmp_caption = gr.Textbox(label="Prompt as sent to Ideogram 4",
+                                                     lines=6, interactive=False)
 
                         with gr.Tab("Vectorize (SVG)"):
                             import cz_vector
@@ -5571,6 +5634,14 @@ def build_ui():
             ok, why = cz_handoff.save_setting(folder)
             return ("Ready: " if ok else "**Off:** ") + why, gr.update(interactive=ok)
         ho_save.click(_ho_save, [ho_dir], [ho_status, ho_btn])
+        cmp_btn.click(_ui_compare_ideogram, [prompt, width, height, seed, gen_steps, history,
+                                             output_dir],
+                      [out, cmp_status, cmp_caption, history, history_gallery])
+
+        def _cmp_save(folder):
+            ok, why = cz_handoff.save_setting(folder, target=cz_handoff.IDEOGRAM)
+            return ("Ready: " if ok else "**Off:** ") + why, gr.update(interactive=ok)
+        cmp_save.click(_cmp_save, [cmp_dir], [cmp_status, cmp_btn])
         vec_btn.click(_ui_vectorize, [vec_img, vec_preset, vec_colors, vec_rembg, save_mode,
                                       output_dir], [vec_preview, vec_file, vec_status])
         faceswap_restore_cb.change(set_faceswap_restore,

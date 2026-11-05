@@ -141,6 +141,18 @@ command line:
 
 Nothing leaves the machine: the files go under the output folder (`handoff/`).
 
+## Comparing with Ideogram 4: crispz-ideogram
+
+The **Compare in crispz-ideogram** tab renders the main prompt with crispz-ideogram on
+the same machine, at the same size and seed, through its protocol v1 command line: a
+MOSS layout is translated to the Ideogram 4 caption schema (same boxes on the same
+0..1000 grid, texts verbatim, graphic-design defaults for the style fields Ideogram
+wants), plain text goes as it is. The prompt as sent is shown in the tab and kept next
+to the result (`handoff/<date>/ideogram_prompt.json`). Set `crispz_ideogram_dir`; the
+running-app or cold-process rule and the port note above apply the same way.
+**Ideogram 4's weights are non-commercial: the comparison is for your eyes, never a
+client deliverable.**
+
 ## Command line
 
 `python app.py --help`, the cheat sheet in [README_CLI.md](README_CLI.md), and the

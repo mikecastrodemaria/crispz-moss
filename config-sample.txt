@@ -81,6 +81,8 @@
     "magic_prompt_temperature": 0.7,
     "_crispz_flux3_dir_help": "The crispz-flux3 install folder (e.g. D:\\Github\\crispz-flux3), for the Edit in crispz-flux3 tab: the image and the instruction are handed to its protocol v1 CLI on this machine (its running app when there is one, otherwise its own process after crispz-moss frees its VRAM). Empty = the tab says how to set it. Env CRISPZ_FLUX3_DIR. Also settable in the tab.",
     "crispz_flux3_dir": "",
+    "_crispz_ideogram_dir_help": "The crispz-ideogram install folder (e.g. D:\\Github\\crispz-ideogram), for the Compare in crispz-ideogram tab: the current prompt (a MOSS layout translated to the Ideogram 4 caption schema) is rendered by Ideogram 4 at the same size through its protocol v1 CLI on this machine, as an A/B. Ideogram 4 is non-commercial: a comparison, never a deliverable. Empty = the tab says how to set it. Env CRISPZ_IDEOGRAM_DIR. Also settable in the tab.",
+    "crispz_ideogram_dir": "",
     "_moss_base_repos_help": "The MOSS-Image repos offered in the Models menu: HF repo ids or local diffusers folders. SFT (the default) for general use, Base for LoRA work and a rawer look. The first is the default.",
     "moss_base_repos": [
         "OpenMOSS-Team/MOSS-Image-SFT",

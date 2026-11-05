@@ -1147,8 +1147,45 @@ Lecture :
 - **Les temps anormaux du premier passage étaient externes** : le fond du logo passe de
   192 à 62 s à réglages identiques, image identique au pixel ; la passe du préfixe
   coûte 0,3 à 1,7 s, le cache tient sous 6 Go. Rien à corriger dans le code.
-- Lot 4b : reste à Mike de VALIDER (une référence) ; les rendus d'outpaint et de reframe
-  du passage de 09:25 (bandes déclarées) ne sont pas encore reçus.
+- **Lot 4b VALIDÉ par Mike le 05/11/2026** (une référence) ; les rendus d'outpaint et de
+  reframe du passage de 09:25 (bandes déclarées) ne sont pas encore reçus. Décision du
+  preset « Draft (8 steps, DMD LoRA) » toujours ouverte.
+
+### Lot 5 (05/11/2026) : outils locaux et passerelles, livré sur `wip/moss-engine`
+
+Lancé sur « Lot 4b validé, passe au step suivant » de Mike.
+- **Remove BG (rembg) et Vectorize (vtracer)** : repris tels quels depuis crispz-ideogram,
+  déjà testés (`test_vector`, `test_local_tools`) ; rien à changer.
+- **Edit in crispz-flux3** : repris ; le texte de l'onglet ne dit plus « MOSS-Image
+  n'édite pas » mais « édition multi-référence NATIVE » (MOSS édite par la LoRA du lot
+  4b). `cz_handoff` généralisé à deux cibles (`TARGETS` : dossier, env, clé de config),
+  même garde « l'instance qui répond est cette app, pas la cible » (`_route`).
+- **Compare in crispz-ideogram** (nouveau, onglet Input Image) : le prompt principal est
+  rendu par crispz-ideogram à la même taille, même seed et mêmes steps, par son CLI du
+  protocole v1 (`gen --spec -`, instance si son app tourne, sinon `--local` après
+  libération de notre VRAM). Un layout MOSS est traduit en légende Ideogram 4 par
+  `cz_caption.to_ideogram` : `high_level_description` = résumé, `background` = résumé
+  (Ideogram l'exige), éléments `text` (texte verbatim, `desc` = caption ou « text ») et
+  `obj` (`character: ...` pour un personnage), boîtes reprises telles quelles (même
+  grille 0..1000 yxyx), palettes <= 5 par élément et <= 16 globale, `style_description`
+  seulement si meta ou palette (aesthetics = meta, défauts « even lighting »,
+  `graphic_design`, « flat graphic design », dits dans les notes), ordre des clés du
+  schéma, JSON minifié UTF-8. Texte libre : tel quel. Le prompt envoyé est affiché dans
+  l'onglet et gardé dans `handoff/<date>/ideogram_prompt.json` (ou `.txt`),
+  `handoff.json` porte les notes et la licence. **Licence Ideogram 4 non commerciale**
+  dite dans l'onglet, le log (`HANDOFF:`) et le fichier : une comparaison, jamais un
+  livrable. Réglage `crispz_ideogram_dir` (env `CRISPZ_IDEOGRAM_DIR`, champ + Save dans
+  l'onglet). Ports : dits dans l'onglet (deux apps sur 7860, la seconde prend 7861 ;
+  `cli_protocol.instance_url` de crispz-ideogram à régler sur le port réel).
+- Tests : `test_caption` (+1 : schéma Ideogram, ordre des clés, boîtes gardées, textes
+  verbatim, hex majuscules, minifié, personnage, texte vide écarté, texte libre tel
+  quel, layout compilé), `test_handoff` (+2 : faux crispz-ideogram en sous-processus,
+  instance / froid / collision de port, spec gen avec taille, seed et steps, fichiers,
+  licence loggée ; réglages séparés de ceux de crispz-flux3), `test_local_tools`
+  (l'onglet nomme Ideogram 4 : admis par le test de vocabulaire).
+- Vérifié : l'UI se construit avec le nouvel onglet (test) ; pas d'essai Chromium.
+- À essayer chez Mike : `crispz_ideogram_dir` pointé sur son install, app crispz-ideogram
+  ouverte puis fermée, un preset (Logo) rendu des deux côtés au même seed.
 
 ## 10. Sources
 
