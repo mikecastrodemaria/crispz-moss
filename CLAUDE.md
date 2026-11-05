@@ -1207,7 +1207,7 @@ Lancé sur « Lot 5 validé, passe au step suivant » de Mike.
   en texte libre (`CZ_E2E_2MPX=0` pour sauter), img2img 0,35 (`_refine_whole`), inpaint
   (`inpaint_run`, hors masque identique au pixel), Stop au step 3 ; sauté sans CUDA ou
   sans accès au repo ; `tests/e2e_timings.txt`, images `tests/e2e_*.png` (gitignorées).
-  **Pas encore lancé sur la 5090.**
+  Passé sur la 5090 le 05/11/2026, voir plus bas.
 - **README** : bannière 0.1.0-dev « les six lots sont livrés », tableau de la chaîne des
   licences avec ce que chacune permet, mesures de tous les lots (img2img, LoRAs, édition),
   section Tests avec le e2e, section Pinokio. **FORK.md** : tableau des différences
@@ -1222,11 +1222,45 @@ Lancé sur « Lot 5 validé, passe au step suivant » de Mike.
   Logo), enfin commercialisable. Comme pour Ideogram, le dossier quittera ce repo quand
   Mike aura créé `crispz-moss.pinokio` ; il clone `main`, donc utile après la fusion.
 - Suite CPU : 70 fichiers (le e2e sauté sans CUDA) ; smoke 22/22.
-- **Reste à décider par Mike** : lancement du e2e GPU, fusion de `wip/moss-engine` dans
+- **Reste à décider par Mike** : fusion de `wip/moss-engine` dans
   `main`, passage d'`APP_VERSION` de 0.1.0-dev à 0.1.0, création du repo
   `crispz-moss.pinokio` (et son icône), le preset « Draft (8 steps, DMD LoRA) », le
   verdict nf4 contre bf16 sur images, et les rendus d'outpaint / reframe du passage de
   09:25 toujours non reçus.
+
+### e2e GPU du lot 6 sur la 5090 (05/11/2026, Mike) : PASSÉ
+
+`.venv\Scripts\python -m pytest tests\test_moss_e2e.py -s` (pytest 9.2.0 installé seul
+dans le venv : il n'est pas dans `requirements.txt`, le CI l'ajoute à part), offload
+'auto' -> 'model' encodeur seul, encodeur bf16, swap du DiT actif, 50 steps, CFG 3,0,
+modèle en cache. **1 passed en 4 min 56**, les six étapes avec leurs assertions
+(inpaint hors masque identique au pixel, Stop qui rend l'image partielle).
+
+| étape | temps | pic réservé | référence des lots 1 à 3 |
+|---|---|---|---|
+| chargement depuis le cache | 34,9 s | 9,73 Go au repos | 28,5 s |
+| 1024, layout du preset Logo (premier rendu : prompt et négatif neufs) | 83,0 s (débruitage 48 s, 1,03 it/s) | 20,47 Go | 85 à 90 s au lot 2, 42,7 s à chaud |
+| 1456x1456 en texte libre (prompt neuf) | 108,7 s (2,02 s/it) | 20,44 Go | 101,7 s |
+| img2img 0,35 (18 steps sur 50, prompt en cache) | 15,2 s | 15,83 Go | 1,2 it/s, cohérent |
+| inpaint 1024 (50 steps, prompt neuf) | 47,4 s | 19,06 Go | 43,4 s à 1,9 Mpx plafonné |
+| Stop au step 3 | 2,8 s | 15,33 Go | 0,8 s au lot 1 (step 19) |
+
+Lecture :
+- Les temps sont ceux des lots 1 à 3 : la 5090 était libre, rien à expliquer (le e2e
+  d'Ideogram avait tourné 1,8 fois plus lent sur une carte partagée).
+- **Le pic sur un prompt neuf dépend de la taille du prompt et de l'image** : 19,1 Go à
+  1024 avec le prompt court de l'inpaint (ligne `vram: after the text: 19.1 GB`), 20,5 Go
+  avec le layout Logo, 23,5 Go au lot 3b avec le long layout de l'affiche à 1,9 Mpx. Le
+  « 17 à 19 Go » espéré au lot 3b était donc juste pour 1024 et faux pour l'affiche : ce
+  sont les temporaires de l'encodeur (noyaux GDN en repli torch, float32) qui grandissent
+  avec la longueur du prompt. Le DiT est bien garé pendant l'encodage (sinon 27 à 30 Go).
+- Sur un prompt en cache, l'encodeur ne revient pas : `after the text: 9.8 GB` pour
+  l'img2img, pic 15,8 Go.
+- Suite au premier rendu, 35 s hors débruitage : deux encodages (négatif + prompt) avec
+  le swap du DiT et les noyaux CUDA à froid. C'est le coût connu du premier rendu du
+  processus, pas une régression.
+- Les images `tests/e2e_*.png` restent à regarder (textes du logo, zone inpaintée), le
+  test ne juge que les assertions.
 
 ## 10. Sources
 

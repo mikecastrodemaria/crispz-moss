@@ -176,7 +176,11 @@ else runs locally). `caps` says what is emulated (`supports.emulated`).
 `.venv\Scripts\python tools\run_tests.py` (CPU, a tiny random MOSS-Image, one process
 per test file: what the CI runs). `tests\test_moss_e2e.py` is the GPU end-to-end run
 (load, 1024, 2 Mpx, img2img, inpaint, Stop; skips without CUDA, timings in
-`tests/e2e_timings.txt`). The lot scripts in `tools/` (`gpu_lot1_check.py` to
+`tests/e2e_timings.txt`; pytest is not in `requirements.txt`, install it alone:
+`.venv\Scripts\python -m pip install pytest`). Passed on the RTX 5090 on 05/11/2026 in
+4 min 56: load 35 s, 1024 in 83 s (first render of the process, prompt and negative
+freshly encoded), 1456x1456 in 109 s, img2img 0.35 in 15 s, inpaint in 47 s, Stop in
+2.8 s, peaks 15 to 20.5 GB. The lot scripts in `tools/` (`gpu_lot1_check.py` to
 `gpu_lot4b_check.py`) measure each part on the card, GPU free.
 
 ## Pinokio
