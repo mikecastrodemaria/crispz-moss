@@ -36,31 +36,33 @@ from cz_core import CONFIG, _log, _dbg
 # crispz-klein's two Consistence-Edit entries are kept below as a merge reference: they are
 # FLUX.2-klein files (double_blocks keys) and cz_pipeline._lora_unsupported refuses them
 # here by family.
+# The outpaint-through-edit-LoRA path of crispz-flux3 (cz_pipeline.outpaint_lora) keeps
+# its names: no MOSS-Image outpaint LoRA exists, the preset is NOT in the catalogue and
+# that path refuses by name (the app's outpaint is the emulated one, lot 3).
 OUTPAINT_PRESET = "Outpaint"
 OUTPAINT_PROMPT = ("Outpaint the image: replace the solid gray areas with a seamless "
                    "continuation of the scene, keeping the existing picture unchanged.")
+# The reference-editing LoRA (lot 4b). Its weights: chinoll/Moss-Image-Edit (the author's
+# training code is GPLv3; the model card states NO licence for the weights, read on
+# 2026-11-05), repacked by Comfy-Org in bf16 at rank 64. Edit contract
+# `ref-prefix-only-t0__target-text-original-moss-v1` (cz_moss.EditPrefix): the image to
+# edit comes FIRST, up to three more references after it, the instruction in plain words
+# (the author's example below). No trigger word.
+EDIT_PRESET = "Moss-Image-Edit"
+EDIT_PROMPT = "Change the background to a sunny beach, preserving the person."
+EDIT_LICENCE = ("weights: no licence stated by the author (chinoll/Moss-Image-Edit; its "
+                "training code is GPLv3). Check before any client deliverable.")
 EDIT_LORA_SPECS = {
-    OUTPAINT_PRESET: {
-        # "FLUX 3 Image Klein Outpaint LoRA" v1.0, CivitAI models/3003865 version 3407881
-        # (2026-10-28, the first edit-task LoRA published for FLUX.3 Image Klein, 13 days
-        # after the model). bf16, 153 MB. The author: "Step 1,000 of a 2,000-step run. Use
-        # it on the distilled model at strength 1.5." The input is the image enlarged with
-        # SOLID GRAY where the scene has to continue; the prompt is the trigger sentence.
-        # cz_pipeline.outpaint_lora builds that canvas from the Inpaint / Outpaint tab
-        # (mode "Expand sides (outpaint LoRA)"); the Edit tab can also take a hand-made one.
-        "repo": "civitai.com/models/3003865",
-        "weights": "flux-3-image-klein-outpaint.safetensors",
-        "civitai": {"versionId": 3407881,
-                    "fileName": "flux-3-image-klein-outpaint.safetensors",
-                    "sizeKB": 156930.765625,
-                    "sha256": "25385da7f6bfac0c18513e52729dc29f96cda543f0d086df9e5dda3842dede83",
-                    "downloadUrl": "https://civitai.com/api/download/models/3407881?fileId=3299567"},
-        "adapter_name": "flux3-outpaint",
-        "prompt": OUTPAINT_PROMPT,
-        "inputs": 1, "base": "flux3-distilled",
-        "weight": 1.5,          # the author's figure; 1.0 leaves gray patches (his examples)
-        "local_names": ["flux-3-image-klein-outpaint.safetensors",
-                        "flux3_outpaint.safetensors"]},
+    EDIT_PRESET: {
+        "repo": "Comfy-Org/MOSS-Image",
+        "weights": "loras/moss_image_edit_lora_rank_64_bf16.safetensors",
+        "adapter_name": "moss-image-edit",
+        "prompt": EDIT_PROMPT,
+        "inputs": 4, "base": "moss",
+        "weight": 1.0,
+        "licence": EDIT_LICENCE,
+        "local_names": ["moss_image_edit_lora_rank_64_bf16.safetensors",
+                        "moss-image-edit.safetensors", "Moss-Image-Edit.safetensors"]},
 }
 
 # --- crispz-klein's catalogue (FLUX.2), a MERGE REFERENCE: does not load on FLUX.3.
@@ -529,11 +531,23 @@ def strip_label(label):
     return str(label).rstrip(" ✓⬇").strip()
 
 
+def edit_ready(index=None):
+    """True when the reference-editing LoRA is on disk (the preset, or a copy in a LoRA
+    library): what cz_protocol announces as supports.edit / supports.refs. Nothing is
+    downloaded here; the Edit tab fetches the preset on its first use."""
+    try:
+        return is_downloaded(EDIT_PRESET, index=index)
+    except Exception as e:
+        _log(f"edit LoRA lookup failed: {e}")
+        return False
+
+
 def catalog():
     """A light list for caps / the UI: [{name, adapter_name, repo, prompt, inputs,
     base, downloaded}] - without downloading anything."""
     idx = local_index()
     return [{"name": n, "adapter_name": s["adapter_name"], "repo": s["repo"],
              "prompt": s.get("prompt", ""), "inputs": int(s.get("inputs", 1)),
-             "base": s.get("base", ""), "downloaded": is_downloaded(n, index=idx)}
+             "base": s.get("base", ""), "licence": s.get("licence", ""),
+             "downloaded": is_downloaded(n, index=idx)}
             for n, s in SPECS.items()]

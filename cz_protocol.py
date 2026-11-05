@@ -77,7 +77,7 @@ SPEC_FIELDS = ("protocol", "op", "prompt", "negative", "width", "height",
 
 _DEF_URL = "http://127.0.0.1:7860"
 
-MAX_REFS = 10                     # kept for the family contract; MOSS-Image takes no reference (OMNI_SUPPORTED)
+MAX_REFS = 4                      # the Moss-Image-Edit LoRA: the image to edit + up to 3 references
 
 # spec.fast (op edit) -> the mode name on the cz_pipeline.set_edit_speed side
 # klein has no speed preset: the model is already distilled to 4 steps and no FLUX.2
@@ -93,9 +93,10 @@ _FAST_ALIASES = {"off": "Off", "none": "Off", "auto": "Auto (model profile)",
 # crispz-krea / crispz-krea2 hard-set this to False (their _load_omni raises:
 # no instruction-edit model exists for Krea) - config can never turn refs on
 # there, and caps must say so instead of promising a capability that raises.
-# crispz-moss: MOSS-Image is text to image only. Editing is local in crispz-flux3
-# (Edit in crispz-flux3 tab); reference editing through a community LoRA is lot 4.
-OMNI_SUPPORTED = False
+# crispz-moss: reference editing runs in the base pipeline through the Moss-Image-Edit
+# LoRA (lot 4b, cz_moss.EditPrefix): supported by the family, AVAILABLE once that LoRA is
+# on disk (cz_edit_loras.edit_ready). Native multi-reference editing: crispz-flux3.
+OMNI_SUPPORTED = True
 # klein serves multi-reference editing from the BASE pipeline (`image` takes a list of
 # PIL images): there is no separate edit repo to configure, so refs are ALWAYS available.
 OMNI_DEFAULT = (os.environ.get("MOSS_MODEL")
@@ -111,10 +112,17 @@ SUPPORTS_NEGATIVE = True
 
 
 def _omni_configured():
-    """Multi-reference editing is NATIVE to the klein base pipeline - nothing to
-    configure, nothing to download separately. Always True (kept as a function so
-    the caps block and any upstream merge stay structurally identical)."""
-    return OMNI_SUPPORTED
+    """Reference editing is available when the Moss-Image-Edit LoRA is on disk (the
+    base pipeline edits through its reference prefix; the base weights alone cannot).
+    No config key: the Edit tab downloads the preset on first use."""
+    if not OMNI_SUPPORTED:
+        return False
+    try:
+        import cz_edit_loras
+        return bool(cz_edit_loras.edit_ready())
+    except Exception as e:
+        _log(f"edit LoRA lookup failed: {e}")
+        return False
 
 
 def instance_url():
@@ -242,7 +250,7 @@ def caps_dict():
             # input + 1 ref (spec.refs). Light listing, nothing is downloaded.
             "edit_loras": _edit_lora_catalog(),
             # Fast modes spec.fast accepts on the edit op.
-            # MOSS-Image has no edit pipeline and no Lightning LoRA: the list comes
+            # MOSS-Image editing (the Moss-Image-Edit LoRA) has no Lightning LoRA: the list comes
             # down to 'off' and the UI hides the control. The field stays present
             # (not absent) so that family clients always read the same one.
             "edit_fast": ["off"]}
@@ -354,8 +362,10 @@ def validate_spec(spec, op="gen"):
         if not os.path.isfile(inp):
             raise SpecError(f"input not found on disk: {inp}")
         if not _omni_configured():
-            raise SpecError(f"edit not supported by {TOOL}: no edit/omni "
-                            f"model configured (zimage_omni_model)", code=3)
+            raise SpecError(f"edit not available on {TOOL}: the Moss-Image-Edit LoRA is "
+                            f"not on disk (pick the preset once in the Edit tab, it is "
+                            f"downloaded; or put moss_image_edit_lora_rank_64_bf16"
+                            f".safetensors in loras/)", code=3)
         out["input"] = inp
         spec = dict(spec)
         spec["refs"] = [inp]
@@ -480,15 +490,16 @@ def validate_spec(spec, op="gen"):
     # (crispz-klein warned here that guidance had no effect: true of a distilled model,
     # false of MOSS-Image, a real CFG. Removed.)
     refs = [str(r) for r in (spec.get("refs") or []) if str(r).strip()]
-    # MOSS-Image takes no reference image: refs are dropped WITH a warning that says
-    # where reference editing lives (crispz-flux3 locally).
+    # Without the edit LoRA on disk, refs are dropped WITH a warning that says how to
+    # get it (and where native reference editing lives: crispz-flux3).
     if refs and not _omni_configured():
-        warnings.append(f"{len(refs)} ref(s) ignored: MOSS-Image takes no reference "
-                        f"image (reference editing: crispz-flux3)")
+        warnings.append(f"{len(refs)} ref(s) ignored: MOSS-Image edits from references "
+                        f"only with the Moss-Image-Edit LoRA, not on disk (Edit tab "
+                        f"preset); native reference editing: crispz-flux3")
         refs = []
     if len(refs) > MAX_REFS:
         warnings.append(f"{len(refs)} refs, keeping the first {MAX_REFS} "
-                        f"(klein pipeline limit)")
+                        f"(the Moss-Image-Edit LoRA was trained for up to {MAX_REFS})")
         refs = refs[:MAX_REFS]
     for r in refs:
         if not os.path.isfile(r):

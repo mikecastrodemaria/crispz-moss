@@ -135,7 +135,9 @@ def test_protocol_caps():
     assert caps["negative"] is True
     assert caps["img2img"] is True and caps["inpaint"] is True
     assert caps["emulated"] == ["img2img", "inpaint"]
-    assert caps["edit"] is False and caps["refs"] is False
+    import cz_edit_loras
+    ready = cz_edit_loras.edit_ready()          # the Moss-Image-Edit LoRA on disk?
+    assert caps["edit"] is ready and caps["refs"] is ready and caps["max_refs"] == 4
     assert caps["cloud"]["enabled"] is False and caps["cloud"]["ops"] == []
     assert cz_protocol.TOOL == "crispz-moss"
 

@@ -89,16 +89,16 @@ def test_validate_spec_bad_values_are_code_2():
 # ------------------------------------------------------------------ refs v2 ---
 @contextlib.contextmanager
 def _omni_config(value="some/omni-model"):
-    from cz_core import CONFIG
-    old = CONFIG.get("zimage_omni_model")
-    CONFIG["zimage_omni_model"] = value
+    """crispz-moss: editing is available when the Moss-Image-Edit LoRA is on disk
+    (cz_edit_loras.edit_ready), not from a config key. The helper keeps its name for the
+    family's tests and fakes that presence: a value = on disk, '' = absent."""
+    import cz_edit_loras
+    old = cz_edit_loras.edit_ready
+    cz_edit_loras.edit_ready = lambda index=None: bool(value)
     try:
         yield
     finally:
-        if old is None:
-            CONFIG.pop("zimage_omni_model", None)
-        else:
-            CONFIG["zimage_omni_model"] = old
+        cz_edit_loras.edit_ready = old
 
 
 def test_caps_refs_follow_omni_support_and_config():
@@ -108,9 +108,10 @@ def test_caps_refs_follow_omni_support_and_config():
         with _omni_config():
             assert cp.caps_dict()["supports"]["refs"] is False
         return
-    # Empty config -> falls back to the family default (qwen-edit has one)
+    # LoRA absent -> no refs, no edit, whatever OMNI_DEFAULT (the base repo) says
     with _omni_config(""):
-        assert cp.caps_dict()["supports"]["refs"] == bool(cp.OMNI_DEFAULT)
+        assert cp.caps_dict()["supports"]["refs"] is False
+        assert cp.caps_dict()["supports"]["edit"] is False
     with _omni_config():
         caps = cp.caps_dict()
         assert caps["supports"]["refs"] is True
@@ -118,10 +119,7 @@ def test_caps_refs_follow_omni_support_and_config():
 
 
 def test_validate_refs_dropped_with_warning_when_unavailable():
-    if cp.OMNI_SUPPORTED and cp.OMNI_DEFAULT:
-        return                       # omni there by default: nothing to drop
-    ctx = _omni_config() if not cp.OMNI_SUPPORTED else _omni_config("")
-    with ctx:
+    with _omni_config(""):                      # the edit LoRA not on disk
         spec, warnings = cp.validate_spec(
             {"protocol": 1, "prompt": "x", "refs": ["a.png"]})
     assert spec["refs"] == []

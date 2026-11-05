@@ -2902,8 +2902,9 @@ def set_omni_model(repo):
     global OMNI_MODEL
     OMNI_MODEL = BASE_REPO
     if (repo or "").strip() and (repo or "").strip() != BASE_REPO:
-        _log(f"Omni model ignored ({repo}): FLUX.3 edits with the base model "
-             f"({BASE_REPO}). Change the checkpoint to change the editor.")
+        _log(f"Omni model ignored ({repo}): MOSS-Image edits with the base model "
+             f"({BASE_REPO}) plus the Moss-Image-Edit LoRA. Change the checkpoint to "
+             f"change the editor.")
 
 
 def list_edit_models():
@@ -2917,10 +2918,19 @@ def check_omni_available():
     """On klein, multi-reference editing is NATIVE to the base pipeline: it is available as
     soon as the model is loadable, with no second download and no repo to check on the Hub.
     So a ready message is always returned (cz_ui's contract wants a markdown string)."""
-    return (f"**Edit ready (native):** `{BASE_REPO}` handles multi-reference editing in "
-            f"the SAME pipeline as txt2img (up to 4 refs) - no second model, no extra "
-            f"VRAM. Note: klein is distilled, so **negative prompts and CFG have no "
-            f"effect** (see FORK.md).")
+    import cz_edit_loras
+    s = cz_edit_loras.spec(cz_edit_loras.EDIT_PRESET) or {}
+    path = cz_edit_loras.available_path(cz_edit_loras.EDIT_PRESET)
+    head = (f"**Edit ready:** the {cz_edit_loras.EDIT_PRESET} LoRA is on disk "
+            f"(`{os.path.basename(path)}`)." if path else
+            f"**Edit needs one download:** the {cz_edit_loras.EDIT_PRESET} LoRA "
+            f"(`{s.get('repo', '')}/{s.get('weights', '')}`, about 300 MB) is fetched on "
+            f"the first Edit, or when the preset is picked below.")
+    return (f"{head} It runs in the SAME pipeline as text to image (`{BASE_REPO}`, no "
+            f"second model): Ref 1 is the image to edit (the output takes its size), up "
+            f"to 3 more references after it, the instruction in plain words. References "
+            f"are read at {engine.edit_ref_max_edge()} px on their long side at most "
+            f"(`moss_edit_ref_max_edge`). Licence of the LoRA {s.get('licence', '')}")
 
 
 @_gpu_exclusive
@@ -4343,6 +4353,67 @@ def _apply_loras(pipe, force=False):
     return ok
 
 
+_EDIT_AUTO_SAID = set()
+
+
+def _apply_moss_edit_loras(pipe, edit):
+    """MOSS-Image (lot 4b): the edit set on top of the base set, through the adapter's
+    own loader. The reference prefix needs a Moss-Image-Edit LoRA: when neither set
+    carries one, the shipped preset is fetched (once) and applied for the edit, said with
+    its licence note. A file the guard refuses is a HARD error (an edit without the LoRA
+    the user asked for would be a false result)."""
+    global _APPLIED_LORAS, _APPLIED_EDIT_LORAS
+    import cz_edit_loras
+    import cz_moss_lora
+    edit = [(p, float(w)) for p, w in edit]
+    for p, _w in edit:
+        why = _lora_unsupported(p) if os.path.isfile(p) else "file not found"
+        if why:
+            _APPLIED_EDIT_LORAS = []
+            raise RuntimeError(f"edit LoRA {os.path.basename(p)}: {why}. "
+                               f"Nothing was generated.")
+    have_edit = [p for p, w in list(LORAS) + edit
+                 if w != 0 and os.path.isfile(p) and cz_moss_lora.is_edit_lora(p)]
+    if not have_edit:
+        spec = cz_edit_loras.spec(cz_edit_loras.EDIT_PRESET) or {}
+        path = cz_edit_loras.resolve(cz_edit_loras.EDIT_PRESET)      # downloads once
+        edit.append((path, float(spec.get("weight", 1.0))))
+        if path not in _EDIT_AUTO_SAID:
+            _EDIT_AUTO_SAID.add(path)
+            _log(f"edit: the {cz_edit_loras.EDIT_PRESET} LoRA is applied for the edit "
+                 f"({os.path.basename(path)}@{float(spec.get('weight', 1.0)):g}; "
+                 f"{spec.get('licence', '')}). It is removed again for text to image.")
+    base = []
+    for p, w in LORAS:
+        if not os.path.isfile(p):
+            _log(f"LoRA file not found, ignored: {p}")
+            continue
+        why = _lora_unsupported(p)
+        if why:
+            _log(f"LoRA SKIPPED, {os.path.basename(p)}: {why}")
+            continue
+        base.append((p, float(w)))
+    seen, wanted = set(), []
+    for pw in base + edit:
+        if pw[0] not in seen:
+            seen.add(pw[0])
+            wanted.append(pw)
+    if wanted != list(pipe.applied_loras):
+        try:
+            pipe.set_loras(wanted)
+        except Exception as e:
+            _APPLIED_LORAS, _APPLIED_EDIT_LORAS = [], []
+            try:
+                pipe.set_loras([])
+            except Exception:
+                pass
+            raise RuntimeError(f"edit LoRA could not be applied ({type(e).__name__}: {e}). "
+                               f"Nothing was generated")
+    _APPLIED_LORAS = wanted
+    _APPLIED_EDIT_LORAS = [pw for pw in wanted if pw in edit]
+    return True
+
+
 def _apply_edit_loras(pipe):
     """EDIT LoRAs: synchronises the edit pipe with EDIT_LORAS (or [] when the 'Edit
     LoRAs' box is unticked). A failure is a hard error: the user asked for that preset, and
@@ -4365,6 +4436,8 @@ def _apply_edit_loras(pipe):
     # 'Edit LoRAs' box, which only concerns the task presets).
     if EDIT_SPEED and EDIT_SPEED.get("path"):
         edit.append((EDIT_SPEED["path"], 1.0))
+    if isinstance(pipe, engine.MossPipe):
+        return _apply_moss_edit_loras(pipe, edit)
     # Union of base + edit, with no duplicate path (the first weight wins, the same
     # rule as the protocol's for `loras`).
     # The LoKrs are already IN the weights (merged at load time), they have no business in
@@ -4740,17 +4813,16 @@ def get_pipe(kind="img2img"):
 
 def generate_omni(refs, prompt, negative, width, height, steps, seed,
                   guidance=None, honor_size=False, steps_explicit=False):
-    """FLUX.3 multi-reference editing: edits one (or several) input image(s) according
-    to the instruction prompt, which cites them as <ref_image_0>, <ref_image_1>...
-    Keeps upstream's signature (cz_ui).
+    """MOSS-Image editing from references (lot 4b): refs[0] is the image to edit, the
+    others (up to 3) are references the instruction may mention in plain words ("the
+    logo of the second image"). Keeps upstream's signature (cz_ui).
 
-    It is the BASE pipeline that edits (`image` takes a list of PIL images): no second
-    model, no duplicate VRAM, no extra loading time.
-    `negative` acts on the base checkpoint only (real CFG); on the distilled one it has
-    NO EFFECT (see _cfg) and cz_protocol announces it through supports.negative = False.
-    width/height are ignored by default (editing preserves the input's dimensions);
-    honor_size=True passes them to the pipe. The edit LoRAs (EDIT_LORAS, the 'Edit LoRAs'
-    box) are applied hot here, on the same transformer as the base.
+    It is the BASE pipeline that edits (MossPipe takes `image` = a list of PIL images and
+    runs its reference prefix, cz_moss.EditPrefix): no second model, no duplicate VRAM.
+    The Moss-Image-Edit LoRA is required and applied hot here (_apply_moss_edit_loras
+    fetches the preset once when no edit LoRA is set); it leaves again for text to image.
+    `negative` is a real CFG on MOSS-Image. width/height are ignored by default (the
+    output takes the source image's size); honor_size=True passes them to the pipe.
 """
     refs = [r.convert("RGB") for r in (refs or []) if r is not None]
     if not refs:
@@ -5253,6 +5325,10 @@ def outpaint_lora(image, directions, prompt, steps, seed, mask=None, expand=0.3,
     global EDIT_LORAS, EDIT_LORAS_ENABLED
     import cz_edit_loras
     name = cz_edit_loras.OUTPAINT_PRESET
+    if cz_edit_loras.spec(name) is None:
+        raise NotImplementedError(
+            "no outpaint LoRA exists for MOSS-Image: use the emulated outpaint (Expand "
+            "sides) of the Inpaint / Outpaint tab, or crispz-flux3's Outpaint LoRA.")
     s = cz_edit_loras.spec(name) or {}
     w = float(s.get("weight", 1.5) if weight is None else weight)
     path = cz_edit_loras.resolve(name)

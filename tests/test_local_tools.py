@@ -33,17 +33,21 @@ def test_remove_bg_failure_is_said(monkeypatch):
     assert imgs == [] and "rembg not installed" in msg
 
 
-def test_the_flux3_edit_tab_and_input_mode_are_hidden():
-    """MOSS-Image does not edit: the inherited FLUX.3 'Edit (references)' tab and input
-    mode must not be offered (editing goes to the Edit in crispz-flux3 tab)."""
+def test_the_edit_tab_and_input_mode_are_offered():
+    """Lot 4b: the 'Edit (references)' tab and input mode are offered (the Moss-Image-Edit
+    LoRA path), next to the Edit in crispz-flux3 hand-over; the tab says what the LoRA
+    is and that its weights carry no stated licence."""
     import gradio as gr
     demo = cz_ui.build_ui()
     tabs = {b.label: b.visible for b in demo.blocks.values() if isinstance(b, gr.Tab)}
-    assert tabs.get(cz_ui.EDIT_MODE) is False
+    assert tabs.get(cz_ui.EDIT_MODE) is True
     assert tabs.get("Edit in crispz-flux3") is True and tabs.get("Vectorize (SVG)") is True
     radios = [b for b in demo.blocks.values()
               if isinstance(b, gr.Radio) and b.label == "Input mode"]
-    assert radios and radios[0].visible is False
+    assert radios and radios[0].visible is True and cz_ui.EDIT_MODE in radios[0].choices[1]
+    texts = " ".join(str(getattr(b, "value", "")) for b in demo.blocks.values()
+                     if isinstance(b, gr.Markdown))
+    assert "Moss-Image-Edit LoRA" in texts and "no licence" in texts
 
 
 def test_no_visible_flux3_or_ideogram_wording_in_the_ui():

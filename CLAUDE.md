@@ -921,6 +921,125 @@ Lancé sur « passe au step suivant » de Mike, après le lot 3b.
   (télécharge 2 LoRAs, 1,3 Go) ; juger `1_deband` contre `0_baseline` sur les aplats, et
   les textes des rendus DMD.
 
+### Passage GPU des lots 3b et 4 (05/11/2026, Mike) : swap mesuré, LoRAs lues sur images
+
+`gpu_lot3_check.py --skip-draft` puis `gpu_lot4_check.py`, à la suite, 07:33 à 07:46,
+offload 'model' encodeur seul, encodeur bf16, swap du DiT actif.
+
+| lot 3b | temps (avant 3b) | pic (avant 3b) | lecture |
+|---|---|---|---|
+| img2img 0,3, premier rendu | 93,7 s (71,0) | **23,5 Go (30,0)** | le swap tient sa promesse sur le pic, pas les 19 Go espérés |
+| img2img 0,6 | 54,7 s (52,3) | 23,5 (réservé, non rendu) | |
+| inpaint | 46,7 s (43,4) | 23,5 (idem) | |
+| outpaint à droite, draft placé | 48,2 s (43,5) | 20,6 (27,2) | images non reçues : faux textes partis ? à juger |
+| reframe 16:9, draft placé | 49,5 s (39,7) | 20,1 (14,3) | prompt neuf (draft placé) : l'encodeur est revenu, d'où le pic |
+| refine 0,3 à 12 / 36 steps | 8,2 / 20,6 s | 15,8 | images non reçues (déjà au lot 3) |
+
+Lecture : le pic du premier img2img passe de 30 à 23,5 Go. Il reste au-dessus des 19 Go
+visés parce que l'encodeur (16,8 Go) était ENCORE sur la carte pendant l'encodage VAE de
+l'image (1,9 Mpx en fp32, plusieurs Go d'activations) : l'ordre était négatif, puis VAE,
+puis prompt, puis premier forward du DiT (où l'encodeur repart). Corrigé au lot 4b :
+quand une image doit être encodée, le prompt est encodé d'abord, l'encodeur repart (le
+DiT revient), le VAE encode ensuite ; pic attendu 17 à 19 Go, à remesurer. Le coût du
+swap sur cette machine : environ 5 à 10 s par prompt NEUF (le DiT de 10 Go en RAM
+pageable et retour, plus que la seconde par sens estimée), visible sur les 4 rendus à
+prompt neuf (+ 3 à 22 s). Un prompt en cache ne coûte rien. `moss_encode_swap: false`
+rend les 30 Go de pic contre ces secondes : au choix de Mike.
+
+| lot 4 (affiche preset, 1152x1632, seed 4242) | temps | pic | lecture sur image |
+|---|---|---|---|
+| 0 baseline 50 steps | 110,1 s | 21,1 Go | affiche plate propre, « HEADLINE » et « DATE · PLACE » exacts, polo bleu, aucun banding visible |
+| 1 DeBand L37-41 à 1,0 | 99,8 s | 22,1 | même composition, textes exacts, mais le STYLE change : grain de papier fin sur toute l'image, t-shirt au lieu du polo, jaune plus froid |
+| 2 LoRA DMD seule, 8 steps, CFG 1 | 17,9 s | 22,8 (prompt ré-encodé) | **image propre et complète**, textes exacts, pull vert, visage tourné ; aucun artefact de sous-échantillonnage |
+| 2 LoRA DMD seule, 12 steps, CFG 3 | 24,1 s | 16,9 | textes exacts, quasi identique au Draft de base ci-dessous |
+| 3 Draft base 12 steps | 21,7 s | 16,8 | textes exacts ; à l'œil la même image que la LoRA DMD à 12 steps |
+
+Lecture :
+- **DeBand** : rien à corriger sur ces affiches (pas de banding au départ) et la LoRA
+  change le rendu (elle remplace les 5 derniers blocs par ceux de Base : un grain de
+  papier apparaît, le vêtement change). À garder opt-in, jamais par défaut ; utile
+  seulement si des rayures verticales apparaissent sur un aplat.
+- **LoRA DMD seule à 8 steps, CFG 1** : contre toute attente (sans l'embedding de temps
+  ni l'échantillonneur de l'auteur), l'image est propre, les textes exacts. Un seul
+  forward par step : le rendu réel est d'environ 8 à 10 s (les 17,9 s comptent un
+  ré-encodage du prompt, pic à 22,8 Go), contre 21,7 s pour le Draft de base à 12 steps
+  (deux forwards par step). À 12 steps CFG 3 la LoRA n'apporte rien sur le Draft de base.
+  **Proposition** : un preset « Draft (8 steps, DMD LoRA) » [8, 1.0] qui télécharge la
+  LoRA (1,2 Go fp32, Apache 2.0) une fois, comme le preset d'édition, et la retire pour
+  les rendus normaux. Décision de Mike ; à mesurer sur 4 seeds avant (un rendu).
+- Les 5 images sont des rendus différents du même seed : chaque LoRA change la
+  composition (vêtement, orientation du visage), c'est attendu (un rendu à 50 steps ne
+  « converge » pas vers celui à 12).
+
+### Lot 4b (05/11/2026) : édition par références, livré sur `wip/moss-engine`, mesure GPU à faire
+
+Lancé sur « passe au step suivant » de Mike. Les quatre inconnues de l'étude du lot 4
+levées en lecture seule (fiche HF, dépôt d'entraînement `Chenkin-x/Moss-Image-Edit`,
+`comfy/ldm/moss_image/model.py` et `comfy_extras/nodes_moss_image.py` de ComfyUI, le
+05/11/2026) : RoPE des références `(i + 1, 0, y centré, x centré)` (cible : `(0,
+longueur du texte, y, x)`, texte : `(0, j, 0, 0)`) ; les références se voient TOUTES
+entre elles (un seul préfixe) ; l'instruction passe telle quelle dans le gabarit de chat
+(pas de système, pas de légende, l'encodeur ne voit pas les images) ; licence des poids :
+AUCUNE dans la fiche HF (code GPLv3 seulement). Entraînement : une référence = l'image
+source, cible de même taille ; inférence : `max_edge` 1024 par défaut (256 dans son
+json, 512 dans le nœud ComfyUI), 4 références au plus, 50 steps, CFG 4, négatif vide,
+références présentes dans les deux branches du CFG. LoRA : `proj.{q,k,v,o,ffn_up_gate,
+ffn_down}`, échelle alpha / rang.
+- **`cz_moss.EditPrefix`** (notre code, rien du GPLv3 repris, le fichier vendorisé
+  intact) : références encodées comme la cible (`_encode_latents`, même `video_embedder`),
+  préfixe modulé à t = 0, passe du préfixe UNE fois par appel (attention préfixe seul,
+  toutes les couches) avec les clés tournées et valeurs de chaque couche gardées (cache
+  K/V, `EDIT_CACHE_MAX_GB` 6 Go, sinon recalcul à chaque forward, dit) ; le corps
+  [cible, texte] attend sur [préfixe, cible, texte] avec deux SDPA par bloc (préfixe
+  mis en tête des clés) ; tête de sortie sur la tranche cible. Sans référence : la passe
+  vendorisée **bit pour bit** (test, couches sautées comprises). Les hooks LoRA du lot 4
+  jouent sur le préfixe aussi (même Linear).
+- `MossPipeline.__call__(reference_latents=[...])` ; `_cz_before_dit` (posé par
+  MossPipe) ramène le DiT garé avant la passe du préfixe (le pré-hook du module ne voit
+  pas cette passe). `MossPipe` : `image` sans strength ni masque = édition ; **refus
+  NOMMÉ sans LoRA d'édition appliquée** (`edit_loras_applied`, métadonnée
+  `moss-edit-lora` lue par `cz_moss_lora.is_edit_lora`) ; Ref 1 = source, sortie à sa
+  taille sauf taille explicite ; références ramenées à `moss_edit_ref_max_edge` (1024)
+  sur le grand côté, jamais agrandies, grille 16 ; 4 au plus (dit) ; Stop joue.
+- **Texte d'abord, VAE ensuite** : quand une image doit être encodée (img2img, inpaint,
+  édition), le prompt est encodé avant, l'encodeur repart (DiT de retour) et SEULEMENT
+  ensuite le VAE encode : le pic de 23,5 Go du lot 3b (encodeur + VAE ensemble) devrait
+  tomber vers 17 à 19 Go. Une visite de l'encodeur pour négatif + prompt.
+- `cz_edit_loras` : le catalogue devient le seul preset « Moss-Image-Edit »
+  (`Comfy-Org/MOSS-Image` `loras/moss_image_edit_lora_rank_64_bf16.safetensors`, poids
+  1,0, 4 entrées, exemple de l'auteur, `licence` « aucune licence dite par l'auteur »
+  affichée dans l'onglet, le log, les caps). `edit_ready()` = fichier sur disque.
+  `cz_pipeline._apply_moss_edit_loras` : jeu de base + jeu d'édition par le chargeur du
+  lot 4 ; sans LoRA d'édition dans les deux jeux, le preset est résolu (téléchargé une
+  fois, ~300 Mo) et appliqué pour l'édition, dit une fois avec la licence ; retiré au
+  prochain rendu texte vers image ; fichier refusé = erreur dure, rien de rendu.
+  `outpaint_lora` (voie LoRA de crispz-flux3) refuse par nom sur MOSS.
+- `cz_protocol` : `OMNI_SUPPORTED` True, `supports.edit` / `refs` = LoRA sur disque,
+  `MAX_REFS` 4, op `edit` refusée (code 3) avec la marche à suivre tant que la LoRA
+  manque, refs ignorées avec la raison. UI : onglet « Edit (references) » et mode
+  d'entrée de retour, texte réécrit (Ref 1, références en mots, LoRA et licence, 1024
+  px, 50 steps CFG 4 chez l'auteur), bouton sans emoji, `check_omni_available` dit si la
+  LoRA est là. `config-sample` : `moss_edit_ref_max_edge`, aides mises à jour.
+- Scheduler : `load_scheduler` ne passe que `num_train_timesteps`, `shift`,
+  `training_shift` (le json du repo porte les clés de la classe mère de diffusers :
+  avertissement « not expected and will be ignored » à chaque chargement, sans effet).
+- Tests : `tests/test_moss_edit.py` (10 : égalité bit pour bit sans référence, cache =
+  recalcul et indépendant de t, références jamais écrites, coordonnées RoPE contre la
+  table vendorisée, tailles, refus nommé, taille source gardée et références plafonnées
+  à 4, Stop, generate_omni qui applique le preset puis le retire, caps du protocole,
+  config du scheduler sans avertissement) ; `test_edit_lora_presets` réécrit (catalogue
+  MOSS, téléchargement HF mocké, LoRA MOSS d'édition qui passe la garde) ;
+  `test_protocol` (présence de la LoRA simulée), `test_local_tools` (onglet offert),
+  `test_moss_engine`, `test_moss_wiring`, `test_flux3_wiring` (refus de l'outpaint LoRA).
+- `tools/gpu_lot4b_check.py` : sur l'affiche du lot 2, édit 1 référence (croissants) à
+  CFG 4 et 3, 2 références (le logo du lot 2 à poser en haut à droite), références à
+  512 px contre 1024, fond du logo (exemple de l'auteur), contrôle sans LoRA refusé ;
+  `bench/lot4b/report.md`.
+- À faire chez Mike : `git pull`, carte libre, `.venv\Scripts\python tools\gpu_lot4b_check.py`
+  (télécharge la LoRA, ~300 Mo) ; juger : le changement demandé et LUI SEUL (textes et
+  reste intacts), le logo de la 2e référence, 512 contre 1024 ; relancer
+  `gpu_lot3_check.py --skip-draft` pour le pic du premier img2img (attendu 17 à 19 Go).
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

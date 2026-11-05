@@ -142,6 +142,33 @@ def inspect_file(path):
     return lf
 
 
+_EDIT_CACHE = {}
+
+
+def edit_contract(path):
+    """The `edit_contract` of a moss-edit-lora file (its adapter_config metadata), or
+    None when the file is not one. Header only, remembered per path."""
+    key = (path, os.path.getmtime(path) if os.path.isfile(path) else None)
+    if key in _EDIT_CACHE:
+        return _EDIT_CACHE[key]
+    out = None
+    try:
+        _keys, meta = read_header(path)
+        raw = (meta or {}).get("adapter_config")
+        cfg = json.loads(raw) if raw else {}
+        if isinstance(cfg, dict) and cfg.get("format") == "moss-edit-lora":
+            out = str((cfg.get("metadata") or {}).get("edit_contract") or "moss-edit-lora")
+    except Exception:
+        out = None
+    _EDIT_CACHE[key] = out
+    return out
+
+
+def is_edit_lora(path):
+    """True for a Moss-Image-Edit LoRA (reference-prefix editing, cz_moss.EditPrefix)."""
+    return edit_contract(path) is not None
+
+
 def refusal(path):
     """Why this MOSS-family file cannot be applied, or None: a layer replacement (a
     control LoRA), or no LoRA tensor at all."""

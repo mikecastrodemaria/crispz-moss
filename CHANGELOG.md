@@ -73,6 +73,19 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   that replaces a layer is refused by name. `tools/gpu_lot4_check.py` measures DeBand and
   the DMD LoRA on the card.
 
+- **Lot 4b, editing from references** (2026-11-05): the Edit (references) tab comes back,
+  on the Moss-Image-Edit LoRA's contract (`cz_moss.EditPrefix`: references VAE-encoded
+  as a prefix at t = 0 that see only each other, target and instruction that see
+  everything, per-layer K/V of the prefix cached once per edit; without references the
+  pass equals the vendored forward bit for bit). The LoRA (chinoll/Moss-Image-Edit as
+  repacked by Comfy-Org, no licence stated by its author, said everywhere) is the one
+  shipped edit preset, fetched once and applied for edits only; an edit without it is
+  refused by name. Ref 1 = the image to edit (the result takes its size), up to 3 more
+  references, read at 1024 px on their long side at most (`moss_edit_ref_max_edge`).
+  Protocol: `supports.edit` / `refs` follow the LoRA's presence, `max_refs` 4. Also: the
+  text is encoded before any VAE encode so the encoder has left the card by then (the
+  lot 3b peak), and the repo's scheduler config loads without diffusers' warning.
+  `tools/gpu_lot4b_check.py`; tests `tests/test_moss_edit.py`.
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
 

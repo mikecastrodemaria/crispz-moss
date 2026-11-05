@@ -4265,10 +4265,9 @@ def build_ui():
             _sample_urls[n] = "/gradio_api/file=" + os.path.abspath(p).replace("\\", "/")
     js_full = CZ_JS.replace("__MAP__", json.dumps(_sample_urls))
     # Omni (multi-reference) is only offered when an Omni/Edit model is configured.
-    # crispz-moss: MOSS-Image has no edit pipeline (cz_protocol.OMNI_SUPPORTED is
-    # False), whatever OMNI_MODEL says (the FLUX.3 code sets it to the base repo): the
-    # Edit (references) tab and input mode stay hidden. Editing: the Edit in crispz-flux3
-    # tab (lot 5).
+    # crispz-moss (lot 4b): reference editing runs in the base pipeline through the
+    # Moss-Image-Edit LoRA (cz_protocol.OMNI_SUPPORTED). The tab is shown whether the
+    # LoRA is on disk or not: the first Edit fetches it and says so.
     import cz_protocol as _czproto
     omni_on = _czproto.OMNI_SUPPORTED and bool((cz_pipeline.OMNI_MODEL or "").strip())
 
@@ -4488,7 +4487,7 @@ def build_ui():
                     input_mode = gr.Radio(
                         ["Upscale / img2img"] + ([EDIT_MODE] if omni_on else []),
                         value="Upscale / img2img", label="Input mode", visible=omni_on,
-                        info="Edit (references) = FLUX.3 edits from the images of the Edit tab, cited in the prompt as `<ref_image_0>`, `<ref_image_1>`... (no tag needed with a single image)")
+                        info="Edit (references) = MOSS-Image edits Ref 1 of the Edit tab from the instruction in the prompt (the Moss-Image-Edit LoRA; up to 3 more references, named in plain words)")
                     with gr.Tabs():
                         with gr.Tab("Upscale or img2img"):
                             gr.Markdown("*MOSS-Image has no native img2img or inpaint: crispz-moss EMULATES them (SDEdit on the tail of its own schedule; latent blending under the mask). Denoise = the fraction of the steps that runs.*")
@@ -4698,15 +4697,19 @@ def build_ui():
                             with gr.Row(elem_classes="cz-omni-head", equal_height=False):
                                 with gr.Column(scale=3, min_width=340):
                                     gr.Markdown(
-                                        "*Edit an image from an instruction: put it in **Ref 1**, "
-                                        "add up to 3 more references, and cite them in the prompt "
-                                        "as `<ref_image_0>` (Ref 1), `<ref_image_1>` (Ref 2)... "
-                                        "e.g. *put the jacket of `<ref_image_1>` on the person in "
-                                        "`<ref_image_0>`*. With a single image no tag is needed: "
-                                        "just say what to change. FLUX.3 takes up to 10 references; the CLI "
-                                        "and the protocol accept them all, this tab offers 4 slots. "
-                                        "Then click **Edit** below (or Generate with Input mode = "
-                                        "Edit (references)). Steps/guidance: Settings.*")
+                                        "*Edit an image from an instruction: put it in **Ref 1** "
+                                        "(the result takes its size), add up to 3 more references "
+                                        "and name them in plain words (*the logo of the second "
+                                        "image*, *the jacket in the third image*). Say what to "
+                                        "change and what to keep, e.g. *Change the background to "
+                                        "a sunny beach, preserving the person.* This runs the "
+                                        "community **Moss-Image-Edit LoRA** on the base model "
+                                        "(fetched once, about 300 MB; its author states no "
+                                        "licence for the weights: check before a client job). "
+                                        "References are read at 1024 px on their long side at "
+                                        "most. Then click **Edit** below (or Generate with Input "
+                                        "mode = Edit (references)). Steps / guidance: Settings "
+                                        "(the author's script uses 50 steps, CFG 4).*")
                                     omni_check_btn2 = gr.Button("Check edit model availability",
                                                                 size="sm")
                                 with gr.Column(scale=2, min_width=300):
@@ -4730,9 +4733,11 @@ def build_ui():
                                         choices=_edit_lora_choices(), value="None",
                                         label="Edit LoRA presets",
                                         info="✓ = on disk, ⬇ = fetched from Hugging Face on first "
-                                             "use. Empty until an edit-task LoRA is published for "
-                                             "FLUX.3 (none yet, 2026-10-28); declare one in config "
-                                             "`edit_loras`. No trigger word: describe the edit.")
+                                             "use. Moss-Image-Edit is applied to every edit even "
+                                             "when 'None' is picked (the reference prefix needs "
+                                             "it); pick it here to set its weight, or declare "
+                                             "another edit LoRA in config `edit_loras`. No trigger "
+                                             "word: describe the edit.")
                                     with gr.Row():
                                         edit_lora_prompt_btn = gr.Button("Use example prompt", size="sm")
                                         edit_lora_refresh_btn = gr.Button("Refresh presets", size="sm")
@@ -4763,12 +4768,11 @@ def build_ui():
                                         value=_initial_edit_speed(),
                                         label="Edit speed",
                                         info="Stacks an acceleration LoRA and forces its step "
-                                             "count. No FLUX.3 one exists yet, and the distilled "
-                                             "checkpoint already runs 16 steps - so this is "
-                                             "hidden until one ships.")
+                                             "count. None is declared for MOSS-Image editing, so "
+                                             "this stays hidden.")
                                 with gr.Column(scale=1, min_width=260):
                                     edit_speed_status = gr.Markdown("", elem_classes="cz-omni-status")
-                            omni_edit_btn = gr.Button("✏️ Edit (Ref 1 + prompt -> image)",
+                            omni_edit_btn = gr.Button("Edit (Ref 1 + prompt -> image)",
                                                       variant="primary", elem_classes="cz-omni-edit-btn")
 
                         with gr.Tab("Face Swap"):

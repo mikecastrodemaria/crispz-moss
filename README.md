@@ -39,7 +39,7 @@ attached. The other crispz studios stay better at photos and editing.
 | **Send to prompt** | from the Asset Browser, an output's prompt, a LoRA's trigger words or one of its CivitAI example prompts goes straight into the app's prompt box |
 | **Vectorize (SVG)** | locally with vtracer: made for logos, icons and flat colours |
 | **Remove BG** | locally with rembg |
-| **Edit with references** | handed to **crispz-flux3** on the same machine (see below) |
+| **Edit with references** | the **Moss-Image-Edit LoRA** (community, lot 4b): the image to edit plus up to 3 references enter the DiT as a prefix, the instruction in plain words; fetched once (about 300 MB), its author states no licence for the weights. Native multi-reference editing: handed to **crispz-flux3** on the same machine (see below) |
 | **LoRAs** | MOSS-Image LoRAs in every published layout (kohya, peft, moss-edit-lora, ComfyUI diffs such as DeBand), applied hot by the app's own loader; what cannot apply is named, nothing is skipped in silence |
 | **The rest of the family** | styles, wildcards, X/Y/Z grids, job queue, Asset Browser, CivitAI search, face swap, detailer, CLI and the family protocol v1 (`czp`) |
 
@@ -103,11 +103,26 @@ included, no banding; the bakery poster in 25 s against 56 s.
   layout placed on the original image (lot 3b) is the fix.
 - Inpaint: describe the whole picture, not only the patch.
 
-## Editing with references: crispz-flux3
+## Editing with references
 
-MOSS-Image does not edit from references. The **Edit in crispz-flux3** tab hands the
-image (and up to 3 references) to crispz-flux3 on the same machine, through its own
-protocol v1 command line:
+Two ways, both local.
+
+**Edit (references) tab (lot 4b)**: MOSS-Image's base weights never saw a reference,
+but the community **Moss-Image-Edit LoRA** (chinoll/Moss-Image-Edit, repacked by
+Comfy-Org, rank 64) teaches it the "reference prefix" contract: the image to edit (Ref 1)
+and up to 3 more references are VAE-encoded and put in front of the sequence at t = 0,
+seeing only each other; the target and the instruction see everything; the result takes
+Ref 1's size. The app rewrote that contract on its vendored DiT (nothing of the GPLv3
+node code is reused) and caches the prefix's keys and values once per edit, so the
+references cost little per step. The LoRA is fetched once (about 300 MB) on the first
+Edit and applied for edits only. **Its author states no licence for the weights** (the
+training code is GPLv3): check before a client deliverable. References are read at
+1024 px on their long side at most (`moss_edit_ref_max_edge`). The author's inference
+script uses 50 steps and CFG 4. Not measured on the GPU yet (`tools/gpu_lot4b_check.py`).
+
+**Edit in crispz-flux3 tab**: native multi-reference editing. It hands the image (and
+up to 3 references) to crispz-flux3 on the same machine, through its own protocol v1
+command line:
 - set the crispz-flux3 install folder in the tab (`crispz_flux3_dir`);
 - if crispz-flux3's app is running, the edit goes through it (model warm); if not, it
   runs in crispz-flux3's own process after crispz-moss frees its VRAM;

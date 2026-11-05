@@ -98,9 +98,10 @@ def test_interrupt_returns_a_partial_image():
 
 
 def test_edit_and_lora_are_refused_by_name():
-    """An image WITHOUT strength or mask is an edit request: refused and routed to
-    crispz-flux3 (img2img / inpaint, with them, are emulated: test_moss_emulated.py)."""
-    with pytest.raises(NotImplementedError, match="crispz-flux3"):
+    """An image WITHOUT strength or mask is an edit request: without the Moss-Image-Edit
+    LoRA it is refused by name, crispz-flux3 named as the native editor (img2img /
+    inpaint, with them, are emulated: test_moss_emulated.py; edits: test_moss_edit.py)."""
+    with pytest.raises(NotImplementedError, match="Moss-Image-Edit.*crispz-flux3"):
         _pipe()(prompt="x", width=256, height=256, num_inference_steps=1,
                 image=Image.new("RGB", (8, 8)))
     with pytest.raises(NotImplementedError, match="set_loras"):

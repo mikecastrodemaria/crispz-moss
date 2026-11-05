@@ -286,7 +286,7 @@ def pipeline_class():
                      output_type='pil', return_dict=True, uncond_skip_layers=(22,),
                      slg_layers=None, slg_scale=0.0, slg_start=0.0, slg_stop=1.0,
                      sigmas=None, callback_on_step_end=None,
-                     callback_on_step_end_tensor_inputs=None):
+                     callback_on_step_end_tensor_inputs=None, reference_latents=None):
             self._interrupt = False                                        # crispz
             uncond_skip_layers = V._validate_skip_layers(
                 uncond_skip_layers, len(self.transformer.layers), 'uncond_skip_layers')
@@ -348,22 +348,33 @@ def pipeline_class():
             else:
                 set_sigmas(self.scheduler, sigmas, device)
             num_steps = len(self.scheduler.timesteps)
+            # crispz (lot 4b): with reference latents the DiT runs through the edit
+            # prefix (EditPrefix), the plain module call otherwise; the prefix is built
+            # once here, after the DiT is back on the card (_cz_before_dit un-parks it).
+            if reference_latents:
+                if callable(getattr(self, "_cz_before_dit", None)):
+                    self._cz_before_dit()
+                prefix = EditPrefix(self.transformer, list(reference_latents))
+                prefix.cache = prefix.cache_bytes() <= EDIT_CACHE_MAX_GB * 1024 ** 3
+                prefix.build(device)
+                dit = prefix
+            else:
+                dit = self.transformer
             for step_index, timestep in enumerate(self.progress_bar(self.scheduler.timesteps)):
                 if self._interrupt:                                        # crispz
                     break
                 skip_active = slg_start <= step_index / num_steps < slg_stop
-                prediction = self.transformer(latents, timestep, positive,
-                                              positive_mask).sample.float()
+                prediction = dit(latents, timestep, positive, positive_mask).sample.float()
                 conditional = prediction
                 if do_cfg:
                     skip_kwargs = ({'skip_layers': uncond_skip_layers}
                                    if uncond_skip_layers and skip_active else {})
-                    uncond = self.transformer(latents, timestep, negative, negative_mask,
-                                              **skip_kwargs).sample.float()
+                    uncond = dit(latents, timestep, negative, negative_mask,
+                                 **skip_kwargs).sample.float()
                     prediction = uncond + guidance_scale * (prediction - uncond)
                 if slg_layers and slg_scale > 0 and skip_active:
-                    skipped = self.transformer(latents, timestep, positive, positive_mask,
-                                               skip_layers=slg_layers).sample.float()
+                    skipped = dit(latents, timestep, positive, positive_mask,
+                                  skip_layers=slg_layers).sample.float()
                     if not do_cfg:
                         prediction = skipped
                     prediction = prediction + slg_scale * (conditional - skipped)
@@ -432,6 +443,216 @@ def encode_swap_setting():
         return bool(CONFIG.get("moss_encode_swap", True))
     except Exception:
         return True
+
+
+# --- Editing from references (lot 4b): the Moss-Image-Edit contract -----------------------
+# Contract `ref-prefix-only-t0__target-text-original-moss-v1` (chinoll/Moss-Image-Edit,
+# read in its training code moss_edit/model.py, its ComfyUI nodes and ComfyUI's own
+# comfy/ldm/moss_image/model.py on 2026-11-05; all GPLv3, read for the CONTRACT, no line
+# of them reused). What the DiT sees:
+#   - the reference images, VAE-encoded and packed exactly like the target (same
+#     `video_embedder`), form a PREFIX of the sequence [refs..., target, text];
+#   - the prefix is modulated at t = 0 (clean images) while target and text keep the
+#     real t; the output head only ever reads the target slice;
+#   - RoPE: reference i sits at (i + 1, 0, y centred, x centred); target and text keep
+#     the base model's coordinates;
+#   - attention: reference queries see the prefix only (all references, so they can
+#     interact); target and text queries see everything;
+#   - the prefix therefore depends on the references alone, never on t or the text: its
+#     per-layer keys and values are computed ONCE per call and reused at every step and
+#     in both CFG branches (the K/V cache of the reference implementation).
+# The base weights were never trained with a prefix: this path needs the edit LoRA.
+EDIT_CONTRACT = "ref-prefix-only-t0__target-text-original-moss-v1"
+EDIT_LORA_FORMAT = "moss-edit-lora"
+EDIT_MAX_REFS = 4                      # "up to four reference images" (the author)
+EDIT_REF_MAX_EDGE = 1024               # the reference inference script's default
+EDIT_CACHE_MAX_GB = 6.0                # above it the prefix is recomputed every forward
+
+
+def edit_ref_max_edge():
+    """config `moss_edit_ref_max_edge` (default 1024), env MOSS_EDIT_REF_MAX_EDGE."""
+    env = os.environ.get("MOSS_EDIT_REF_MAX_EDGE")
+    try:
+        if env:
+            return max(GRID, int(env))
+        from cz_core import CONFIG
+        return max(GRID, int(CONFIG.get("moss_edit_ref_max_edge") or EDIT_REF_MAX_EDGE))
+    except Exception:
+        return EDIT_REF_MAX_EDGE
+
+
+def ref_size(width, height, max_edge):
+    """A reference's working size: never enlarged, the long side capped at `max_edge`,
+    both sides rounded to the 16 px grid (at least 16)."""
+    scale = min(1.0, float(max_edge) / float(max(width, height)))
+    w = max(GRID, int(round(width * scale / GRID)) * GRID)
+    h = max(GRID, int(round(height * scale / GRID)) * GRID)
+    return w, h
+
+
+def _rope_from_ids(rope, ids):
+    """The rotary table (1, N, head_dim) of (r, f, y, x) coordinates, laid out exactly as
+    the vendored _RoPE does (sin then cos per band, flattened)."""
+    if rope.bands.dtype != torch.float32:
+        rope.bands = rope._default_bands(ids.device)
+    phase = ids.float().unsqueeze(-1) * rope.bands.to(ids.device)
+    return torch.cat((phase.sin(), phase.cos()), -2).flatten(-2).unsqueeze(0)
+
+
+def ref_rope_ids(index, height, width, device):
+    """Reference `index` (0-based): r = index + 1, f = 0, rows and columns centred."""
+    h, w = torch.meshgrid(torch.arange(height, device=device),
+                          torch.arange(width, device=device), indexing="ij")
+    ids = torch.stack((torch.full_like(h, index + 1), torch.zeros_like(h), h, w),
+                      -1).flatten(0, 1).float()
+    ids[:, 2] -= (height - 1) / 2
+    ids[:, 3] -= (width - 1) / 2
+    return ids
+
+
+def _time_modulation(tr, times):
+    """(mod (B, 6, D), head (B, 2, D)) of the vendored DiT for `times` (B,), the same
+    arithmetic as its forward (float64 sinusoid, float32 MLP input)."""
+    half = tr.config.freq_dim // 2
+    freq = 10000 ** (-torch.arange(half, device=times.device, dtype=torch.float64) / half)
+    phase = times.double()[:, None] * freq
+    emb = torch.cat((phase.cos(), phase.sin()), -1).float()
+    time = tr.time_embedding(emb.to(tr.time_embedding[0].weight.dtype)).float()
+    b = times.shape[0]
+    mod = tr.shared_block_modulation(time.to(tr.shared_block_modulation.weight.dtype)).view(b, 6, -1)
+    head = tr.video_head_modulation(time.to(tr.video_head_modulation.weight.dtype)).view(b, 2, -1)
+    return mod, head
+
+
+def _heads(x, heads):
+    return x.reshape(*x.shape[:2], heads, x.shape[-1] // heads)
+
+
+def _block_qkv(layer, x, modulation):
+    """(q, k, v, y_dtype) of a block for the segment `x` under `modulation` (1, 6, D):
+    q and k already head-normed, NOT yet rotated; the segment's attention input."""
+    shift_a, scale_a = modulation[:, 0], modulation[:, 1]
+    dtype = layer.proj["q"].weight.dtype
+    y = (layer.norm1(x) * (1 + scale_a[:, None]) + shift_a[:, None]).to(dtype)
+    q = layer.q_norm(layer.proj["q"](y).unflatten(-1, (layer.heads, -1))).flatten(2)
+    k = layer.k_norm(layer.proj["k"](y).unflatten(-1, (layer.heads, -1))).flatten(2)
+    return q, k, layer.proj["v"](y)
+
+
+def _block_finish(layer, x, attended, modulation):
+    """The rest of a block after its attention output `attended` (gate, FFN, gate)."""
+    gate_a, shift_f, scale_f, gate_f = (modulation[:, 2], modulation[:, 3],
+                                        modulation[:, 4], modulation[:, 5])
+    dtype = layer.proj["q"].weight.dtype
+    V = _vendored()
+    x = x + layer.proj["o"](attended) * gate_a[:, None]
+    y = layer.norm2(x) * (1 + scale_f[:, None]) + shift_f[:, None]
+    hidden, gate = layer.proj["ffn_up_gate"](y.to(dtype)).chunk(2, -1)
+    return x + layer.proj["ffn_down"](V._situ(hidden, gate)) * gate_f[:, None]
+
+
+def _attend(q, q_rope, keys, values, heads):
+    """SDPA of rotated queries over already-rotated keys. q (1, Lq, D), q_rope
+    (1, Lq, hd); keys / values (1, Lk, D). Returns (1, Lq, D)."""
+    V = _vendored()
+    q = V._rotate(_heads(q, heads), q_rope).transpose(1, 2)
+    k = _heads(keys, heads).transpose(1, 2)
+    v = _heads(values, heads).transpose(1, 2)
+    out = torch.nn.functional.scaled_dot_product_attention(q.to(v.dtype), k.to(v.dtype), v)
+    return out.transpose(1, 2).flatten(2)
+
+
+class EditPrefix:
+    """The reference prefix of one edit call on the vendored DiT: `refs` = packed,
+    bn-normalized latents (1, 128, h, w), one per reference, the SOURCE image first.
+    build() runs the prefix through the DiT once (t = 0, prefix-only attention) and keeps
+    each layer's rotated keys and values; __call__ then runs the body [target, text]
+    attending to [prefix, target, text]. The LoRA hooks on the DiT's Linear modules fire
+    on both passes, so the edit LoRA shapes the prefix too."""
+
+    def __init__(self, transformer, refs, cache=True):
+        self.tr = transformer
+        self.refs = [r for r in (refs or [])]
+        self.cache = bool(cache)
+        self.kv = None          # per layer: (keys rotated, values) of the prefix
+        self.tokens = sum(int(r.shape[-2] * r.shape[-1]) for r in self.refs)
+
+    def _embed(self, device):
+        tr = self.tr
+        dtype = tr.video_embedder.weight.dtype
+        toks, ropes = [], []
+        for i, r in enumerate(self.refs):
+            ri = r[:1].to(device=device, dtype=dtype)
+            h, w = ri.shape[-2:]
+            toks.append(tr.video_embedder(ri.flatten(2).transpose(1, 2).contiguous()))
+            ropes.append(_rope_from_ids(tr.rope, ref_rope_ids(i, h, w, device)))
+        x = torch.cat(toks, 1)
+        return x, torch.cat(ropes, 1).to(x.dtype)
+
+    def cache_bytes(self):
+        d = int(self.tr.config.dim)
+        return 2 * len(self.tr.layers) * self.tokens * d * 2        # k and v, bf16
+
+    def build(self, device):
+        """The per-layer (keys, values) of the prefix, at t = 0, prefix-only attention."""
+        tr = self.tr
+        x, rope = self._embed(device)
+        mod0, _ = _time_modulation(tr, torch.zeros(1, device=device, dtype=torch.float32))
+        kv = []
+        V = _vendored()
+        for layer in tr.layers:
+            q, k, v = _block_qkv(layer, x, mod0)
+            k_rot = V._rotate(_heads(k, layer.heads), rope).flatten(2)
+            kv.append((k_rot, v))
+            att = _attend(q, rope, k_rot, v, layer.heads)
+            x = _block_finish(layer, x, att, mod0)
+        self.kv = kv
+        return kv
+
+    def __call__(self, hidden_states, timestep, encoder_hidden_states,
+                 encoder_attention_mask=None, skip_layers=None):
+        """The vendored forward with the prefix in front; returns `.sample` like it."""
+        tr = self.tr
+        V = _vendored()
+        skip = V._validate_skip_layers(skip_layers, len(tr.layers))
+        batch, _, height, width = hidden_states.shape
+        device = hidden_states.device
+        mask = encoder_attention_mask
+        if mask is None:
+            mask = torch.ones(encoder_hidden_states.shape[:2], dtype=torch.bool, device=device)
+        if self.refs and (self.kv is None or not self.cache):
+            self.build(device)
+        times = torch.as_tensor(timestep, device=device, dtype=torch.float32).reshape(-1)
+        times = times.expand(batch)
+        mod, head = _time_modulation(tr, times)
+        dtype = tr.video_embedder.weight.dtype
+        outputs = []
+        for index in range(batch):
+            context = encoder_hidden_states[index:index + 1, mask[index].bool()]
+            if context.shape[1] == 0:
+                raise ValueError("Each sample needs at least one valid text token.")
+            video = hidden_states[index:index + 1].flatten(2).transpose(1, 2)
+            video = tr.video_embedder(video.to(dtype).contiguous())
+            rope = tr.rope(height, width, context.shape[1], device).to(video.dtype)
+            text = tr.text_embedder(context, rope[:, height * width:])
+            x = torch.cat((video, text), 1)
+            m = mod[index:index + 1]
+            for li, layer in enumerate(tr.layers):
+                if li in skip:
+                    continue
+                q, k, v = _block_qkv(layer, x, m)
+                k_rot = V._rotate(_heads(k, layer.heads), rope).flatten(2)
+                if self.refs:
+                    pk, pv = self.kv[li]
+                    k_rot = torch.cat((pk.to(k_rot.dtype), k_rot), 1)
+                    v = torch.cat((pv.to(v.dtype), v), 1)
+                att = _attend(q, rope, k_rot, v, layer.heads)
+                x = _block_finish(layer, x, att, m)
+            x = tr.final_norm_video(x[:, :height * width].to(tr.final_norm_video.weight.dtype))
+            x = x * (1 + head[index:index + 1, 1, None]) + head[index:index + 1, 0, None]
+            x = tr.final_linear_video(x.to(tr.final_linear_video.weight.dtype))
+            outputs.append(x.transpose(1, 2).reshape(1, -1, height, width))
+        return types.SimpleNamespace(sample=torch.cat(outputs))
 
 
 NO_OTHER_TEXT = "no other text"
@@ -534,6 +755,9 @@ class MossPipe:
         object.__setattr__(self, "_loras", [])
         object.__setattr__(self, "released", False)
         object.__setattr__(self, "skip_layers", tuple(UNCOND_SKIP_LAYERS))
+        # The edit path (lot 4b) runs the DiT outside its module call, so the pre-hook
+        # that brings a parked DiT back cannot fire: the pipeline calls this first.
+        pipe._cz_before_dit = self._encoder_out
 
     def release(self):
         """Lets go of the real pipeline, so that a reference to THIS wrapper kept by some
@@ -603,6 +827,12 @@ class MossPipe:
     @property
     def applied_loras(self):
         return list(getattr(self, "_loras", None) or [])
+
+    def edit_loras_applied(self):
+        """The applied LoRA files whose metadata says `moss-edit-lora` (the reference
+        prefix needs one: the base weights never saw a prefix)."""
+        import cz_moss_lora
+        return [p for p, w in self.applied_loras if w != 0 and cz_moss_lora.is_edit_lora(p)]
 
     # --- 'model' offload = the TEXT ENCODER only -----------------------------------------
     # diffusers' enable_model_cpu_offload chains text_encoder -> transformer -> vae, each
@@ -897,6 +1127,44 @@ class MossPipe:
     # constant on MOSS: nothing to rotate. Inpaint: after each step the latents outside
     # the mask are put back to the init image noised to the sigma just reached (latent
     # blending, the crispz-flux3 technique); the mask is max-pooled to the 16-pixel grid.
+    # --- Editing from references (lot 4b) --------------------------------------------
+    def _edit_refs(self, image):
+        """The reference images of an edit call (the source first), or a NAMED refusal:
+        the reference prefix only makes sense with the Moss-Image-Edit LoRA applied."""
+        refs = list(image) if isinstance(image, (list, tuple)) else [image]
+        refs = [r for r in refs if r is not None]
+        if not refs:
+            raise ValueError("edit needs at least one image (the one to edit, first)")
+        if not self.edit_loras_applied():
+            raise NotImplementedError(
+                "editing from references needs the Moss-Image-Edit LoRA (its 'moss-edit-lora' "
+                "metadata): pick the 'Moss-Image-Edit' preset in the Edit (references) tab or "
+                "the file in Models > LoRA. MOSS-Image's base weights were never trained with "
+                "reference images; without the LoRA the result would be noise. Native "
+                "multi-reference editing: crispz-flux3 (Edit in crispz-flux3 tab).")
+        if len(refs) > EDIT_MAX_REFS:
+            self._say_once(("refs", len(refs)),
+                           f"{len(refs)} reference images: the edit LoRA was trained for up "
+                           f"to {EDIT_MAX_REFS}, keeping the first {EDIT_MAX_REFS}")
+            refs = refs[:EDIT_MAX_REFS]
+        return refs
+
+    def _reference_latents(self, refs, width, height):
+        """The packed latents of the references, each at its working size (long side
+        capped at moss_edit_ref_max_edge, never enlarged, on the 16 px grid)."""
+        dev = self._offload_device or self._pipe._execution_device
+        cap = edit_ref_max_edge()
+        out, sizes = [], []
+        for r in refs:
+            rw, rh = ref_size(r.size[0], r.size[1], cap)
+            sizes.append(f"{rw}x{rh}")
+            out.append(self._encode_latents(r, rw, rh, dev))
+        tokens = sum(int(z.shape[-2] * z.shape[-1]) for z in out)
+        _log(f"edit (Moss-Image-Edit): {len(out)} reference(s) at {', '.join(sizes)} "
+             f"({tokens} prefix tokens), output {width}x{height}, LoRA "
+             + ", ".join(os.path.basename(p) for p in self.edit_loras_applied()))
+        return out
+
     def _encode_latents(self, image, width, height, device):
         """Normalized MOSS latents (1, 128, h/16, w/16) of `image` at width x height: the
         exact inverse of MossPipeline.decode_latents (VAE, (c, p, p) packing, bn)."""
@@ -1006,10 +1274,12 @@ class MossPipe:
             # Output size = the asked one, else the image's own (on MOSS's grid).
             width = width or init.size[0]
             height = height or init.size[1]
-        elif image is not None:
-            raise NotImplementedError(
-                "MOSS-Image does not edit images (text to image only). Local editing: send "
-                "the image to crispz-flux3 (Edit in crispz-flux3 tab).")
+        refs = []
+        if image is not None and not emulated:
+            refs = self._edit_refs(image)
+            # Output size: the asked one, else the source image's own (on the grid).
+            width = width or refs[0].size[0]
+            height = height or refs[0].size[1]
         if isinstance(prompt, str):
             prompt, width, height, note = prepare_prompt(prompt, width, height, fit=emulated)
             if note:
@@ -1057,10 +1327,25 @@ class MossPipe:
             kw["sigmas"] = list(sigmas)
         if latents is not None:
             kw["latents"] = latents
+        if "prompt" in kw and (emulated or refs):
+            # The text first, and the encoder leaves (the parked DiT comes back) BEFORE
+            # the VAE encodes any image: the 16.8 GB encoder and the VAE's fp32
+            # activations never add up on the card (measured 23.5 GB on a 1.9 Mpx
+            # img2img with the two together, lot 3b). One encoder visit for the
+            # negative and the prompt.
+            self._keep_encoder_offload()
+            self._encoder_in()
+            try:
+                e, m = self._pipe.encode_prompt(kw.pop("prompt"), int(max_sequence_length))
+            finally:
+                self._encoder_out()
+            kw["prompt_embeds"], kw["prompt_attention_mask"] = e, m
         restore = None
         if emulated:
             callback_on_step_end, restore = self._prepare_emulated(
                 kw, init, mask_image, strength, steps, w, h, generator, callback_on_step_end)
+        if refs:
+            kw["reference_latents"] = self._reference_latents(refs, w, h)
         if callback_on_step_end is not None:
             kw["callback_on_step_end"] = callback_on_step_end
         self._keep_encoder_offload()
@@ -1202,11 +1487,18 @@ def _components_kw(token):
     return kw
 
 
+SCHEDULER_KEYS = ("num_train_timesteps", "shift", "training_shift")
+
+
 def load_scheduler(repo, token=None):
+    """The repo's scheduler config, reduced to the three keys the vendored scheduler
+    takes: OpenMOSS saved it through diffusers' FlowMatchEulerDiscreteScheduler, whose
+    other keys (dynamic shifting, karras...) only earned a warning on every load."""
     V = _vendored()
     try:
-        return V.MOSSImageScheduler.from_pretrained(repo, subfolder="scheduler",
-                                                    **_components_kw(token))
+        cfg = V.MOSSImageScheduler.load_config(repo, subfolder="scheduler",
+                                               **_components_kw(token))
+        return V.MOSSImageScheduler(**{k: cfg[k] for k in SCHEDULER_KEYS if k in cfg})
     except Exception as e:
         _log(f"scheduler config of {repo} not read ({type(e).__name__}: {e}); "
              f"using the built-in MOSS schedule (shift 5.0)")
