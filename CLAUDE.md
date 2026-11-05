@@ -886,9 +886,37 @@ Lancé sur « passe au step suivant » de Mike, après le lot 3b.
   téléchargés dans `loras/` (Apache 2.0 tous deux), temps et pics dans `bench/lot4/`.
 - **Point 3 du cahier (édition par références, `Moss-Image-Edit`)** : la LoRA se charge
   (dialecte `moss-edit-lora`), mais sans la construction de séquence des nœuds ComfyUI
-  (références en préfixe à t = 0) elle ne sert à rien ; étude des nœuds en cours, voir
-  plus bas. Le code des nœuds est GPLv3 : à comprendre et réécrire, jamais à vendoriser
-  (l'app est CC BY-NC).
+  (références en préfixe à t = 0) elle ne sert à rien. Le code des nœuds est GPLv3 : lu
+  pour comprendre le contrat, jamais à vendoriser (l'app est CC BY-NC) ; ce qui suit est
+  une description, le code sera réécrit depuis elle sur le DiT vendorisé (Apache 2.0).
+- **Étude des nœuds `Chenkin-x/ComfyUI-Moss-Image-Edit`** (`nodes.py`, `native_edit.py`,
+  README, lus le 05/11/2026 ; le code source du dépôt d'entraînement et la fiche HF des
+  poids n'ont pas été lus). Contrat `ref-prefix-only-t0__target-text-original-moss-v1` :
+  | point | ce que font les nœuds |
+  |---|---|
+  | références | l'image source D'ABORD, puis `reference_0..N` (le README dit 4 au plus, le code ne plafonne pas) ; chacune réduite à 512 px de grand côté (`reference_max_edge`, multiples de 16, lanczos, jamais recadrée), encodée UNE fois par le VAE FLUX.2 |
+  | séquence | `[ref_1 ... ref_N, cible, texte]` : les références passent par le MÊME `video_embedder` que la cible et sont mises en PRÉFIXE (le schéma du README dit `[texte, ref, cible]`, le code dit préfixe) |
+  | temps | modulation des références avec `time_embedding(t = 0)` (image propre), cible et texte avec le vrai t. Le `_Block.forward` vendorisé applique UNE modulation à toute la séquence : il faut une modulation par segment |
+  | RoPE | référence i : coordonnée 0 = i + 1 (la cible et le texte ont 0), y et x centrés comme la cible ; la coordonnée 1 des références n'est pas vérifiée (la cible y porte `text_length`) |
+  | attention | les requêtes des références ne regardent que les clés du préfixe ; cible et texte regardent TOUT. Réalisable sans masque : deux appels SDPA par bloc (préfixe sur lui-même, corps sur la séquence entière) |
+  | sortie | seule la tranche cible passe par `final_norm_video` / `final_linear_video` ; les références ne sont ni mises à jour ni rendues ; recalculées à chaque forward (pas de cache K/V dans le port ComfyUI, le dépôt d'origine en décrit un) |
+  | échantillonnage | depuis un latent vide à la taille demandée, scheduler normal ; la LoRA est un patch à l'exécution (pas de fusion), force 0 = modèle de base |
+  | texte | l'instruction est encodée par le nœud ComfyUI de base « Text Encode MOSS-Image Edit » (hors dépôt) : `target-text-original-moss` suggère le texte tel quel, non vérifié |
+  | licences | nœuds et dépôt d'entraînement GPLv3 ; **poids de la LoRA : aucune licence dite** dans les README (fiche HF à lire) ; les LoRAs Comfy-Org `moss_image_edit_lora_rank_64` suivent la même métadonnée |
+  **Faisabilité dans crispz-moss** : tout tient dans notre code, sans toucher au fichier
+  vendorisé : une passe d'édition dans `cz_moss` (embedding des références, modulation
+  à t = 0 sur le préfixe, RoPE avec index de référence, deux SDPA par bloc, tranche
+  cible), une centaine de lignes ; le chargeur du lot 4 applique déjà la LoRA sur toutes
+  les positions, préfixe compris. À régler avant d'écrire, en lisant la fiche HF et le
+  dépôt d'entraînement (lecture seule) : la coordonnée 1 des références, si les
+  références se voient entre elles ou chacune seule, la construction du texte, et la
+  licence des poids. Ordre de travail proposé (lot 4b, après le verdict GPU du lot 4) :
+  passe d'édition + test CPU sur le miniature (zéro référence = image identique au
+  forward de base, forme de sortie, références jamais écrites), puis
+  `gpu_lot4_check.py --edit` avec la LoRA Comfy-Org (bf16, rang 64) sur l'affiche du
+  lot 2 (« remplace le pain par un croissant », une référence), onglet « Edit
+  (references) » réactivé seulement si le rendu tient, avec la licence des poids
+  affichée « non précisée » tant qu'elle ne l'est pas.
 - À faire chez Mike : `git pull`, carte libre, `.venv\Scripts\python tools\gpu_lot4_check.py`
   (télécharge 2 LoRAs, 1,3 Go) ; juger `1_deband` contre `0_baseline` sur les aplats, et
   les textes des rendus DMD.
