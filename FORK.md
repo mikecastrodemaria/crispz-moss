@@ -20,7 +20,12 @@
 | Légende | JSON Ideogram (boîtes en millièmes, vérificateur officiel) | layout MOSS (boîtes en pixels, compilé en coordonnées centrées) |
 | Fichiers uniques | refusés (pas de convertisseur) | ComfyUI / CivitAI acceptés (bf16, fp8, int8 ConvRot), 4 bits refusés |
 | Cloud | fonctions Ideogram 4.5 (cachées) | aucune |
-| img2img / inpaint | émulés | émulés (même technique, ordre de tokens FLUX) |
+| img2img / inpaint | émulés | émulés (même technique, ordre de tokens FLUX) ; outpaint et reframe avec le draft placé et les bandes neuves déclarées |
+| LoRAs | mixin diffusers (`Ideogram4LoraLoaderMixin`) | chargeur maison par hooks (kohya, peft, moss-edit-lora, diffs ComfyUI) |
+| Édition par références | aucune (cloud Ideogram 4.5 caché) | LoRA Moss-Image-Edit, préfixe de références sur le DiT vendorisé (`cz_moss.EditPrefix`) |
+| Passerelles | Edit in crispz-flux3 | Edit in crispz-flux3, Compare in crispz-ideogram (layout traduit en légende Ideogram 4) |
+| Catalogue | aucun | MOSS-Image Character Catalog dans l'Asset Browser, « Send to crispz-moss » |
+| Offload | encodeur seul | encodeur seul, le DiT garé pendant l'encodage (`moss_encode_swap`), texte encodé avant tout VAE |
 
 Les notes de crispz-ideogram sont gardées dans `FORK-ideogram.md` et
 `FORK-ideogram-CLAUDE.md` (pièges d'environnement, mesures), celles de crispz-flux3 dans
@@ -28,4 +33,7 @@ Les notes de crispz-ideogram sont gardées dans `FORK-ideogram.md` et
 
 ## Mesures
 
-Voir `README.md` (tableau RTX 5090) et `CLAUDE.md` §9 pour les passages détaillés.
+Voir `README.md` (tableau RTX 5090) et `CLAUDE.md` §9 pour les passages détaillés. En
+bref, sur la même carte : 1024 en 43 s contre 61 s pour Ideogram 4, 2 Mpx en 102 s contre
+394 s pour 4 Mpx, pic 15 Go contre 23 ; A/B texte 24 rendus sur 24 exacts. Le prix : 27 Go
+de poids bf16 (un encodeur de 16,8 Go en RAM entre deux prompts) contre 15 Go nf4.

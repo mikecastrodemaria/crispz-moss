@@ -27,7 +27,7 @@ aussi fiable que celui d'Ideogram 4 (les tests indépendants se contredisent, vo
 | | MOSS-Image (local) |
 |---|---|
 | Poids | `OpenMOSS-Team/MOSS-Image-SFT` (usage général) et `MOSS-Image-Base` (base des LoRAs), non gated |
-| Licence | Apache 2.0, poids et code de pipeline ; encodeur Qwen3.5-9B Apache 2.0 ; VAE repris de FLUX.2 klein 4B (Apache 2.0, à confirmer au lot 6) |
+| Licence | Apache 2.0, poids et code de pipeline ; encodeur Qwen3.5-9B Apache 2.0 ; VAE repris de FLUX.2 klein 4B (Apache 2.0 au niveau du repo, confirmé au lot 6) |
 | DiT | 5B, 42 blocs, dim 3072, 24 têtes (head_dim 128), FFN 8192, SiTU-GLU, RoPE 4D, modulation partagée |
 | Encodeur | Qwen3.5-9B gelé (`Qwen3_5Model`, 32 couches, hidden 4096), `last_hidden_state` seulement, tour vision incluse dans les poids (`qwen3_5_vision`) |
 | VAE | `AutoencoderKLFlux2` (32 canaux, normalisation `bn`), le même que FLUX.2, FLUX.3 et Ideogram 4 |
@@ -288,7 +288,7 @@ perdue (test CPU sur fixtures), DeBand et Draft mesurés sur la carte.
 Apache 2.0 sur les poids MOSS-Image et le code du pipeline (fichier LICENSE du repo HF).
 Usage commercial permis, attribution et mention des modifications à conserver. Les
 composants tiers suivent leur propre licence : Qwen3.5-9B (Apache 2.0), VAE FLUX.2 klein
-4B (Apache 2.0, à confirmer sur le repo black-forest-labs), LoRAs communautaires (à lire
+4B (Apache 2.0 au niveau du repo, confirmé le 05/11/2026), LoRAs communautaires (à lire
 une par une ; `Moss-Image-Edit` : code GPLv3, poids non précisés). Pour Supersonique
 Studio : livrables clients possibles avec le modèle de base ; les LoRAs tierces sont
 vérifiées avant tout usage client.
@@ -1186,6 +1186,47 @@ Lancé sur « Lot 4b validé, passe au step suivant » de Mike.
 - Vérifié : l'UI se construit avec le nouvel onglet (test) ; pas d'essai Chromium.
 - À essayer chez Mike : `crispz_ideogram_dir` pointé sur son install, app crispz-ideogram
   ouverte puis fermée, un preset (Logo) rendu des deux côtés au même seed.
+- **Lot 5 VALIDÉ par Mike le 05/11/2026.**
+
+### Lot 6 (05/11/2026) : tests, doc, livraison, livré sur `wip/moss-engine`
+
+Lancé sur « Lot 5 validé, passe au step suivant » de Mike.
+- **Chaîne des licences vérifiée à la source** (fiches HF et fichiers LICENSE, GitHub
+  OpenMOSS, lus le 05/11/2026) : poids MOSS-Image SFT et Base **Apache 2.0** (badge, texte
+  de la fiche « weights and bundled inference code », LICENSE complet) ; code du pipeline
+  Apache 2.0 (GitHub) ; Qwen3.5-9B Apache 2.0 (LICENSE « Copyright 2026 Alibaba Cloud ») ;
+  FLUX.2-klein-4B Apache 2.0 au niveau du repo (« fully open under Apache 2.0 »), aucun
+  fichier de licence propre au dossier `vae/` ; la fiche SFT dit « the bundled VAE uses
+  the FLUX.2 small decoder » et ne nomme pas l'encodeur (identifié par sa config
+  `Qwen3_5Model` et les noms de fichiers Comfy-Org). Comfy-Org, DeBand, LoRA DMD : badges
+  Apache 2.0. **Moss-Image-Edit : aucune licence pour les poids** (code GPLv3). Le § 2 et
+  le § 6 du cahier sont donc confirmés ; le « à confirmer » du VAE est levé.
+  Point d'attention noté : la fiche klein 4B cite aussi des « Self-Hosted Commercial
+  License Terms » et la licence non commerciale, qui visent le 9B ; le 4B reste Apache.
+- **`tests/test_moss_e2e.py`** : chargement, 1024 avec le layout du preset Logo, 1456x1456
+  en texte libre (`CZ_E2E_2MPX=0` pour sauter), img2img 0,35 (`_refine_whole`), inpaint
+  (`inpaint_run`, hors masque identique au pixel), Stop au step 3 ; sauté sans CUDA ou
+  sans accès au repo ; `tests/e2e_timings.txt`, images `tests/e2e_*.png` (gitignorées).
+  **Pas encore lancé sur la 5090.**
+- **README** : bannière 0.1.0-dev « les six lots sont livrés », tableau de la chaîne des
+  licences avec ce que chacune permet, mesures de tous les lots (img2img, LoRAs, édition),
+  section Tests avec le e2e, section Pinokio. **FORK.md** : tableau des différences
+  complété (LoRAs, édition, passerelles, catalogue, offload), mesures en bref.
+- **Launcher Pinokio** préparé dans `pinokio/` (repris de celui de crispz-ideogram,
+  `66b70a6` de son historique) : clone de crispz-moss, venv 3.11, mêmes règles que
+  `install.bat` (Pillow 13 à part, extras après), torch 2.11 cu128, vérification
+  `Qwen3_5Model` + `AutoencoderKLFlux2` + outlines + vtracer, message de fin sans token ni
+  licence à accepter (27 Go au premier rendu), README avec la chaîne des licences et les
+  mesures. Scripts vérifiés par `node` (ils se chargent). **Icône provisoire** (un « M »
+  sur fond vert, dessiné avec PIL) : à remplacer par un logo généré avec l'app (preset
+  Logo), enfin commercialisable. Comme pour Ideogram, le dossier quittera ce repo quand
+  Mike aura créé `crispz-moss.pinokio` ; il clone `main`, donc utile après la fusion.
+- Suite CPU : 70 fichiers (le e2e sauté sans CUDA) ; smoke 22/22.
+- **Reste à décider par Mike** : lancement du e2e GPU, fusion de `wip/moss-engine` dans
+  `main`, passage d'`APP_VERSION` de 0.1.0-dev à 0.1.0, création du repo
+  `crispz-moss.pinokio` (et son icône), le preset « Draft (8 steps, DMD LoRA) », le
+  verdict nf4 contre bf16 sur images, et les rendus d'outpaint / reframe du passage de
+  09:25 toujours non reçus.
 
 ## 10. Sources
 

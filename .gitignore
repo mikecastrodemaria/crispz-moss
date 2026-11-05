@@ -99,3 +99,7 @@ bench/
 # Announcement drafts (posts), local only
 PINOKIO_POST.md
 REDNOTE_POST.md
+
+# GPU end-to-end run outputs (tests/test_moss_e2e.py)
+tests/e2e_*.png
+tests/e2e_timings.txt

@@ -7,21 +7,31 @@ MOSS-Image (OpenMOSS, Fudan, October 2026) is a 5B open-weights model under **Ap
 renders), it rendered every requested text exactly, faster, and with no licence strings
 attached. The other crispz studios stay better at photos and editing.
 
-> **Work in progress (0.1.0-dev, 2026-11-04).** Lots 1 to 3 of 6 are in: the engine,
-> the single-file loaders, the layout editor, the magic prompt, Describe, and the
-> emulated img2img / inpaint / outpaint. LoRAs (lot 4), the local tools (lot 5) and the
-> release (lot 6) follow. The specification and the work log are in `CLAUDE.md`.
+> **0.1.0-dev, 2026-11-05.** The six lots of the specification are in: the engine and
+> the single-file loaders, the layout editor, the magic prompt and Describe, the emulated
+> img2img / inpaint / outpaint, LoRAs and editing with references, the local tools and
+> the hand-overs, the GPU end-to-end test and this documentation. The specification and
+> the work log (every measurement, every decision) are in `CLAUDE.md`.
 
 ## Licence: read this first
 
-- **The model.** MOSS-Image's weights and pipeline code are **Apache 2.0** (OpenMOSS).
-  Its text encoder is Qwen3.5-9B (Apache 2.0) and its VAE is FLUX.2 klein's (Apache 2.0,
-  to confirm on the black-forest-labs repo at release). Commercial use is allowed:
-  client deliverables made locally are fine. Community LoRAs each carry their own
-  licence, read before any client use.
-- **This app's code** is under CC BY-NC 4.0 (see [LICENSE.txt](LICENSE.txt)).
-- **Nothing leaves the machine.** There is no cloud function at all. Ollama, when used,
-  is a local server (its URL is logged at every call).
+The chain, as stated at the source (Hugging Face model cards and LICENSE files, GitHub,
+read on 2026-11-05):
+
+| Component | Licence | What it means |
+|---|---|---|
+| MOSS-Image weights (`OpenMOSS-Team/MOSS-Image-SFT`, `-Base`) and bundled pipeline code | **Apache 2.0** (card and LICENSE file) | commercial use allowed; keep the attribution and say what you changed |
+| Pipeline code vendored in `third_party/moss_image/` | Apache 2.0 (OpenMOSS GitHub) | unchanged copy, with its LICENSE and origin commit |
+| Text encoder Qwen3.5-9B (`Qwen/Qwen3.5-9B`, Alibaba Cloud) | Apache 2.0 (card and LICENSE) | same; the SFT card names no encoder, the identification comes from its config (`Qwen3_5Model`) and the Comfy-Org file names |
+| VAE (the FLUX.2 "small decoder", `black-forest-labs/FLUX.2-klein-4B`) | Apache 2.0 at the repo level (card: "fully open under Apache 2.0"); no separate licence file for the `vae/` folder | the 9B klein is non-commercial, the 4B and its VAE are not |
+| Comfy-Org repack and its LoRAs, DeBand, the DMD LoRA | Apache 2.0 badges | read each card before client use |
+| Moss-Image-Edit LoRA (chinoll; the Comfy-Org `moss_image_edit_lora_rank_64` file) | **no licence stated for the weights** (the training code is GPLv3) | the app says so wherever it fetches it; not for a client deliverable until the author says |
+| Character Catalog (hide1) | MIT for the author's data; the characters and renders are third-party IP | reference only, not for client work |
+| This app's code | CC BY-NC 4.0 ([LICENSE.txt](LICENSE.txt)) | |
+
+**Nothing leaves the machine.** There is no cloud function at all. Ollama, when used, is
+a local server (its URL is logged at every call); the hand-overs call crispz-flux3 and
+crispz-ideogram on this machine.
 
 ## What it does
 
@@ -77,15 +87,17 @@ Windows, torch 2.11 cu128, bf16, offload `auto` (encoder only), 50 steps, CFG 3.
 |---|---|
 | Load from the cache | 25 to 30 s |
 | VRAM at rest | 9.7 GB allocated (DiT + VAE) |
-| 1024x1024 | 43 s (0.85 s/step), 15 GB peak once the prompt is cached; 27 GB while a new prompt was encoded before `moss_encode_swap` (the DiT now steps aside: about 19 GB expected, to measure), 21 GB flat with the nf4 encoder |
+| 1024x1024 | 43 s (0.85 s/step), 15 GB peak once the prompt is cached; 23.5 GB while a new prompt is encoded (the encoder and its temporaries, the DiT stepping aside: `moss_encode_swap`), 21 GB flat with the nf4 encoder |
 | 1456x1456 (2 Mpx) | 102 s (2.0 s/step), 15.6 GB peak |
 | 2048x1152 | 116 s (2.3 s/step), 15.7 GB peak |
 | Stop | the partial image comes back 0.8 s after the request |
 | Magic prompt | Ollama 12 to 20 s; local (Qwen3.5-9B + LM head) 77 s |
 | Describe (local) | 76 s, the logo's text read back, boxes on the symbol and the text |
-| img2img 1152x1632, denoise 0.3 / 0.6 | 71 s (first render, cold) / 52 s |
-| Inpaint, outpaint, reframe (work area capped at ~1 Mpx) | 43 s, 44 s, 40 s |
+| img2img 1152x1632, denoise 0.3 / 0.6 | 75 s (first render, new prompt) / 52 s, texts exact at both |
+| Inpaint, outpaint, reframe (work area capped at ~1 Mpx) | 45 s, 47 s, 46 s |
 | Draft, the poster at 12 / 20 / 25 / 50 steps | 25 / 34 / 43 / 85 s, texts exact at every count |
+| LoRAs (DeBand, the DMD LoRA at 8 steps CFG 1) | 100 s, 18 s (about 9 s of render), texts exact |
+| Edit with references, 1152x1632 poster, CFG 4 / 3 | 170 s / 125 s, 24 GB peak, texts exact; a 1024 logo on a new background 62 s |
 
 A/B against Ideogram 4 (crispz-ideogram's lot 2 posters, 4 seeds each, plain text and
 layout): 24 renders out of 24 with every requested text exact, small fixed texts
@@ -162,8 +174,15 @@ else runs locally). `caps` says what is emulated (`supports.emulated`).
 ## Tests
 
 `.venv\Scripts\python tools\run_tests.py` (CPU, a tiny random MOSS-Image, one process
-per test file: what the CI runs). The lot scripts in `tools/` (`gpu_lot1_check.py`,
-`gpu_lot2_check.py`, `gpu_lot3_check.py`) measure each part on the card, GPU free.
+per test file: what the CI runs). `tests\test_moss_e2e.py` is the GPU end-to-end run
+(load, 1024, 2 Mpx, img2img, inpaint, Stop; skips without CUDA, timings in
+`tests/e2e_timings.txt`). The lot scripts in `tools/` (`gpu_lot1_check.py` to
+`gpu_lot4b_check.py`) measure each part on the card, GPU free.
+
+## Pinokio
+
+A 1-click launcher lives in `pinokio/` (install, start, update, reset; the same venv
+rules as `install.bat`); it is published as its own repo, `crispz-moss.pinokio`.
 
 ## Credits
 

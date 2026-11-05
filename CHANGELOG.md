@@ -93,6 +93,13 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   MOSS layout translated to the Ideogram 4 caption schema (`cz_caption.to_ideogram`),
   the prompt as sent shown and saved, the non-commercial licence of Ideogram 4 said in
   the tab, the log and the hand-off file. Setting `crispz_ideogram_dir`.
+- **Lot 6, tests, documentation, delivery** (2026-11-05): the GPU end-to-end test
+  `tests/test_moss_e2e.py` (load, 1024 with a layout, 2 Mpx, img2img, inpaint with the
+  outside kept pixel for pixel, Stop; skips without CUDA); the licence chain verified at
+  the source and written in the README (MOSS Apache 2.0, Qwen3.5-9B Apache 2.0, FLUX.2
+  klein 4B VAE Apache 2.0 at the repo level, the Moss-Image-Edit weights without a stated
+  licence); the measurements of every lot; FORK.md updated; the Pinokio launcher
+  prepared in `pinokio/` (to be published as `crispz-moss.pinokio`, provisional icon).
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
 
