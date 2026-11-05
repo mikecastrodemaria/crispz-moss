@@ -1108,6 +1108,17 @@ Lecture :
   phrase équivalente qui nomme les côtés. Tests : `test_caption`, `test_moss_wiring`.
   À remesurer sur les mêmes rendus.
 
+### Troisième passage du lot 3b (05/11/2026, Mike, 09:25) : img2img lus, pic toujours 23,48
+
+`gpu_lot3_check.py --skip-draft` avec les bandes déclarées : premier img2img 74,6 s (93,7
+puis 79,7 aux passages précédents), pic 23,48 Go pour la troisième fois à la décimale
+(le plancher de l'encodeur bf16 sur un prompt neuf, confirmé par la constance ; la ligne
+`vram:` de la console tranche définitivement). Outpaint 46,6 s, reframe 46,1 s, refine
+7,7 / 19,5 s : stables. Images reçues : les deux img2img (0,3 et 0,6) de l'affiche aux
+croissants, identiques à l'œil, « GRAND OPENING » et « SATURDAY 9 AM · RUE DU PAIN »
+exacts, composition intacte : l'img2img avec layout tient aux deux forces. Les rendus
+d'outpaint et de reframe de ce passage (bandes déclarées) ne sont pas encore reçus.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
