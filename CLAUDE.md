@@ -1119,6 +1119,37 @@ croissants, identiques à l'œil, « GRAND OPENING » et « SATURDAY 9 AM · RUE
 exacts, composition intacte : l'img2img avec layout tient aux deux forces. Les rendus
 d'outpaint et de reframe de ce passage (bandes déclarées) ne sont pas encore reçus.
 
+### Deuxième passage GPU du lot 4b (05/11/2026, Mike, 09:38) : textes exacts à la taille d'origine
+
+`tools/gpu_lot4b_check.py`, références lues à leur taille (défaut 2048), ligne
+`edit prefix:` dans le rapport, 11 minutes en tout :
+
+| étape | temps | pic | préfixe | lecture sur image |
+|---|---|---|---|---|
+| 0 édit 1 réf, CFG 4, affiche à 1152x1632 | 170,1 s | 23,95 Go | 7344 tokens, passe 1,0 s, cache 3,53 Go | **croissants dans le panier, « GRAND OPENING » et « SATURDAY 9 AM · RUE DU PAIN » EXACTS**, fond crème et style gardés |
+| 1 idem, CFG 3 | 125,5 s | 20,4 | idem | **textes exacts aussi**, croissants un peu différents |
+| 2 édit 2 réfs (affiche + logo) | 153,9 s | 23,3 | 11440 tokens, 1,7 s, 5,50 Go | textes de l'affiche exacts ; un badge café posé en haut à droite comme demandé (badge générique « COFEE / COFFEE », pas le logo « BEAN THERE »), mais le symbole et le texte du logo fuient encore sur le panier |
+| 3 idem étape 0, référence lue à 1024 | 105,3 s | 18,0 | 2880 tokens, 0,3 s, 1,38 Go | rendu identique au premier passage (même seed) : « OPENNAJ », « SATUIDAY », « RUE BU PAIN » |
+| 4 fond du logo 1024 | **62,3 s** (192,4 au premier passage) | 21,1 | 4096 tokens, 0,4 s, 1,97 Go | identique au premier passage : parfait |
+| 5 contrôle sans LoRA | | | | refusé par nom |
+
+Lecture :
+- **Critère d'acceptation du lot 4b atteint sur une référence** : la source lue à sa
+  taille rend les textes exacts à CFG 4 ET à CFG 3, l'édition demandée est faite et elle
+  seule (fond, panier, typographie intacts). La même édition à 1024 casse les lettres :
+  la règle « paires de même taille » de l'entraînement est confirmée sur images ;
+  le défaut 2048 est le bon. Coût : 125 à 170 s pour 1,9 Mpx (texte vers image : 110 s),
+  pic 24 Go, cache K/V 3,5 Go.
+- **Deux références : toujours expérimental.** Le logo demandé arrive bien dans le coin
+  (c'est l'instruction), mais redessiné en badge générique, et le symbole + le texte de
+  la référence se plaquent encore sur le panier. L'avertissement reste ; pas d'autre
+  correctif tant que la LoRA n'est entraînée qu'à une référence.
+- **Les temps anormaux du premier passage étaient externes** : le fond du logo passe de
+  192 à 62 s à réglages identiques, image identique au pixel ; la passe du préfixe
+  coûte 0,3 à 1,7 s, le cache tient sous 6 Go. Rien à corriger dans le code.
+- Lot 4b : reste à Mike de VALIDER (une référence) ; les rendus d'outpaint et de reframe
+  du passage de 09:25 (bandes déclarées) ne sont pas encore reçus.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

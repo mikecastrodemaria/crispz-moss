@@ -125,7 +125,7 @@ pairs of the same size, and on the 5090 a poster read at 1024 came back with gar
 texts. The LoRA was trained with ONE reference (the image to edit): extra references are
 experimental, their content leaks into the result. Texts are redrawn, not copied: check
 them. The author's inference script uses 50 steps and CFG 4 (measured better than CFG 3
-on the texts). First measurements: `tools/gpu_lot4b_check.py`, see CLAUDE.md.
+on the texts). Measured on the RTX 5090 (50 steps): the 1152x1632 poster edited with its texts exact in 125 to 170 s (peak 24 GB, the prefix's K/V cache 3.5 GB), a 1024 logo put on a beach in 62 s; the same poster read at 1024 came back with broken letters.
 
 **Edit in crispz-flux3 tab**: native multi-reference editing. It hands the image (and
 up to 3 references) to crispz-flux3 on the same machine, through its own protocol v1
