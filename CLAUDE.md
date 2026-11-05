@@ -1351,6 +1351,10 @@ le ratio des Settings au lieu de ceux de Ref 1.
   fois, défaut protocole intact) ; `test_local_tools` : la case est offerte, décochée.
 - Non mesuré sur la carte : la qualité des textes quand la taille change (attendu moins
   bonne, lot 4b : la LoRA a été entraînée sur des paires de même taille).
+- README (demande de Mike) : section « Character and style catalog » avec la marche à
+  suivre (téléchargement de l'index, onglets Characters et Styles, vignettes depuis le
+  Hub ou rendus en local, « Send to crispz-moss », autocomplétion, avis de droits) ;
+  hide1 ajouté aux crédits. Le README n'en avait qu'une ligne de tableau.
 
 ## 10. Sources
 

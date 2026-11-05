@@ -168,6 +168,45 @@ running-app or cold-process rule and the port note above apply the same way.
 **Ideogram 4's weights are non-commercial: the comparison is for your eyes, never a
 client deliverable.**
 
+## Character and style catalog
+
+The **MOSS-Image Character Catalog** (hide1 on Hugging Face: 33,935 characters from
+3,953 series and 314 styles, each rendered with MOSS-Image and tagged with its prompt,
+its tags and its facets: hair, eyes, gender, outfit) is browsable from the app. Nothing
+is fetched until you ask for it, and nothing leaves the machine but the downloads you
+click.
+
+1. **Generate tab, accordion "Character catalog (MOSS-Image, 34,249 samples)"**: click
+   **Download / update the catalog (7 MB, huggingface.co)**. The index lands in
+   `cache/moss/`, the log writes a `CATALOG:` line, the status under the button says
+   what is on disk. A second click only updates it.
+2. **Asset Browser** (its own tab, button "Open Asset Browser"): two new tabs,
+   **Characters** and **Styles**. Folders on the left are the series (one per
+   copyright), the search box matches names, tags and prompts, the cards come 600 at a
+   time. A card opens the sheet: name, series, facets, prompt, tags, the full
+   "generation prompt" (the whole scene the catalog rendered) and a link to the sample
+   on Hugging Face.
+3. **Images**: by default the cards show no picture. Tick **Show thumbnails from
+   huggingface.co** in the accordion to let the browser load them from the Hub (that is
+   the only case where it talks to huggingface.co while you browse). Or keep them
+   locally: **Download the thumbnails (34,249 files, ~270 MB)** or **Download the full
+   renders (~1.8 GB)** fetch the dataset into `cache/moss/character_catalog/` (resumable:
+   a second click only takes what is missing; about an hour per batch at the anonymous
+   Hub rate, faster with an `hf_token` in the config). Local files always win over the
+   Hub.
+4. **Send to crispz-moss**: on a sheet, the buttons **prompt**, **tags**, **generation
+   prompt** and **append tags** put the text into the app's prompt box (switch back to
+   the crispz-moss tab: the box is filled and Gradio has seen it). The same bridge sends
+   an output's prompt, a LoRA's trigger words or one of its CivitAI example prompts.
+5. **Autocompletion**: the catalog's character, series and style names are written to
+   `tags/moss_catalog.csv` and offered in the prompt box from the next launch, like any
+   CSV of `tags/`.
+
+**Rights, shown in the accordion, the browser and every sheet**: the catalog is
+uncurated, and its characters, artworks and renders are third-party intellectual
+property (the catalog's own NOTICE). The author's data is MIT. Use it for reference,
+styles and prompt ideas, not for a client deliverable.
+
 ## Command line
 
 `python app.py --help`, the cheat sheet in [README_CLI.md](README_CLI.md), and the
@@ -195,6 +234,7 @@ is published as its own repo: https://github.com/mikecastrodemaria/crispz-moss.p
 
 OpenMOSS for MOSS-Image and its pipeline (Apache 2.0, vendored in
 `third_party/moss_image/`); Qwen (Qwen3.5-9B, Apache 2.0); Black Forest Labs (the FLUX.2
-VAE); diffusers and transformers; vtracer (MIT); rembg (MIT); the crispz family
+VAE); hide1 for the MOSS-Image Character Catalog (MIT for the data; the characters are
+third-party IP); diffusers and transformers; vtracer (MIT); rembg (MIT); the crispz family
 (crispz-klein, crispz-flux3, crispz-ideogram) this studio is forked from. How and why:
 [FORK.md](FORK.md); the full work log: [CLAUDE.md](CLAUDE.md).
