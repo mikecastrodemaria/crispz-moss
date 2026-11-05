@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import struct
+import time
 import types
 
 import torch
@@ -356,7 +357,14 @@ def pipeline_class():
                     self._cz_before_dit()
                 prefix = EditPrefix(self.transformer, list(reference_latents))
                 prefix.cache = prefix.cache_bytes() <= EDIT_CACHE_MAX_GB * 1024 ** 3
+                t_prefix = time.time()
                 prefix.build(device)
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                _log(f"edit prefix: {prefix.tokens} tokens through the DiT once in "
+                     f"{time.time() - t_prefix:.1f} s, K/V cache "
+                     f"{prefix.cache_bytes() / 1024 ** 3:.2f} GB"
+                     + ("" if prefix.cache else " (over the cap: recomputed every forward)"))
                 dit = prefix
             else:
                 dit = self.transformer
@@ -465,12 +473,18 @@ def encode_swap_setting():
 EDIT_CONTRACT = "ref-prefix-only-t0__target-text-original-moss-v1"
 EDIT_LORA_FORMAT = "moss-edit-lora"
 EDIT_MAX_REFS = 4                      # "up to four reference images" (the author)
-EDIT_REF_MAX_EDGE = 1024               # the reference inference script's default
+# The LoRA was trained on PAIRS of the same size (source = the one reference, target):
+# the source enters at its own size by default (the output takes it too), capped at the
+# model's 2048 side. The author's inference script caps at 1024: measured on the 5090
+# (lot 4b, 1152x1632 poster read at 720x1024), the texts came back garbled; at 512 the
+# source was lost altogether.
+EDIT_REF_MAX_EDGE = MAX_SIDE
 EDIT_CACHE_MAX_GB = 6.0                # above it the prefix is recomputed every forward
 
 
 def edit_ref_max_edge():
-    """config `moss_edit_ref_max_edge` (default 1024), env MOSS_EDIT_REF_MAX_EDGE."""
+    """config `moss_edit_ref_max_edge` (default 2048 = the references at their own
+    size), env MOSS_EDIT_REF_MAX_EDGE."""
     env = os.environ.get("MOSS_EDIT_REF_MAX_EDGE")
     try:
         if env:
@@ -1144,9 +1158,15 @@ class MossPipe:
                 "multi-reference editing: crispz-flux3 (Edit in crispz-flux3 tab).")
         if len(refs) > EDIT_MAX_REFS:
             self._say_once(("refs", len(refs)),
-                           f"{len(refs)} reference images: the edit LoRA was trained for up "
-                           f"to {EDIT_MAX_REFS}, keeping the first {EDIT_MAX_REFS}")
+                           f"{len(refs)} reference images: the edit LoRA takes up to "
+                           f"{EDIT_MAX_REFS}, keeping the first {EDIT_MAX_REFS}")
             refs = refs[:EDIT_MAX_REFS]
+        if len(refs) > 1:
+            self._say_once("multiref",
+                           "edit with several references: the Moss-Image-Edit LoRA was "
+                           "TRAINED with a single reference (the image to edit); extra "
+                           "references are experimental, their content and framing can leak "
+                           "into the result (measured on the 5090, lot 4b)")
         return refs
 
     def _reference_latents(self, refs, width, height):

@@ -4698,18 +4698,20 @@ def build_ui():
                                 with gr.Column(scale=3, min_width=340):
                                     gr.Markdown(
                                         "*Edit an image from an instruction: put it in **Ref 1** "
-                                        "(the result takes its size), add up to 3 more references "
-                                        "and name them in plain words (*the logo of the second "
-                                        "image*, *the jacket in the third image*). Say what to "
-                                        "change and what to keep, e.g. *Change the background to "
-                                        "a sunny beach, preserving the person.* This runs the "
-                                        "community **Moss-Image-Edit LoRA** on the base model "
-                                        "(fetched once, about 300 MB; its author states no "
-                                        "licence for the weights: check before a client job). "
-                                        "References are read at 1024 px on their long side at "
-                                        "most. Then click **Edit** below (or Generate with Input "
-                                        "mode = Edit (references)). Steps / guidance: Settings "
-                                        "(the author's script uses 50 steps, CFG 4).*")
+                                        "(the result takes its size). Say what to change and what "
+                                        "to keep, e.g. *Change the background to a sunny beach, "
+                                        "preserving the logo.* This runs the community "
+                                        "**Moss-Image-Edit LoRA** on the base model (fetched "
+                                        "once, about 300 MB; its author states no licence for "
+                                        "the weights: check before a client job). The LoRA was "
+                                        "trained with ONE reference: Ref 2 to 4 are experimental, "
+                                        "their content can leak into the result. Texts in the "
+                                        "image are redrawn, not copied: keep Ref 1 at its own "
+                                        "size (`moss_edit_ref_max_edge`) and check them. Then "
+                                        "click **Edit** below (or Generate with Input mode = "
+                                        "Edit (references)). Steps / guidance: Settings (the "
+                                        "author's script uses 50 steps, CFG 4; CFG 4 kept the "
+                                        "texts better than 3 on the 5090).*")
                                     omni_check_btn2 = gr.Button("Check edit model availability",
                                                                 size="sm")
                                 with gr.Column(scale=2, min_width=300):

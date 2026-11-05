@@ -116,9 +116,13 @@ Ref 1's size. The app rewrote that contract on its vendored DiT (nothing of the 
 node code is reused) and caches the prefix's keys and values once per edit, so the
 references cost little per step. The LoRA is fetched once (about 300 MB) on the first
 Edit and applied for edits only. **Its author states no licence for the weights** (the
-training code is GPLv3): check before a client deliverable. References are read at
-1024 px on their long side at most (`moss_edit_ref_max_edge`). The author's inference
-script uses 50 steps and CFG 4. Not measured on the GPU yet (`tools/gpu_lot4b_check.py`).
+training code is GPLv3): check before a client deliverable. References enter at their
+own size (long side capped at 2048, `moss_edit_ref_max_edge`): the LoRA was trained on
+pairs of the same size, and on the 5090 a poster read at 1024 came back with garbled
+texts. The LoRA was trained with ONE reference (the image to edit): extra references are
+experimental, their content leaks into the result. Texts are redrawn, not copied: check
+them. The author's inference script uses 50 steps and CFG 4 (measured better than CFG 3
+on the texts). First measurements: `tools/gpu_lot4b_check.py`, see CLAUDE.md.
 
 **Edit in crispz-flux3 tab**: native multi-reference editing. It hands the image (and
 up to 3 references) to crispz-flux3 on the same machine, through its own protocol v1

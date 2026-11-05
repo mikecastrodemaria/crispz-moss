@@ -146,11 +146,16 @@ def test_the_adapter_edits_at_the_source_size_with_capped_references(tmp_path, m
         calls.append(kw)
         return real_call(self, *a, **kw)
     monkeypatch.setattr(pipe._pipe.__class__, "__call__", spy_call)
+    said = []
+    monkeypatch.setattr(cz_moss, "_log", lambda m: said.append(str(m)))
     src = Image.new("RGB", (272, 256), (200, 30, 30))
     refs = [Image.new("RGB", (100, 20), (30, 30, 200)), Image.new("RGB", (40, 40)),
             Image.new("RGB", (40, 40)), Image.new("RGB", (40, 40)), Image.new("RGB", (40, 40))]
     out = pipe(prompt="make it blue", image=[src] + refs, num_inference_steps=2, generator=_gen())
     assert out.images[0].size == (272, 256)                 # the source's own size
+    assert sum("TRAINED with a single reference" in m for m in said) == 1
+    assert any(m.startswith("edit prefix:") and "tokens" in m for m in said), said
+    assert cz_moss.EDIT_REF_MAX_EDGE == 2048                 # references at their own size
     assert seen[0] == (64, 64) and seen[1] == (64, 16)      # capped at 64, on the grid
     assert len(seen) == cz_moss.EDIT_MAX_REFS                # six images -> four
     assert len(calls[-1]["reference_latents"]) == cz_moss.EDIT_MAX_REFS

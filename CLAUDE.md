@@ -1040,6 +1040,49 @@ ffn_down}`, échelle alpha / rang.
   reste intacts), le logo de la 2e référence, 512 contre 1024 ; relancer
   `gpu_lot3_check.py --skip-draft` pour le pic du premier img2img (attendu 17 à 19 Go).
 
+### Premier passage GPU du lot 4b (05/11/2026, Mike) : l'édition marche, les textes et la 2e référence non
+
+`tools/gpu_lot4b_check.py`, 08:24 à 08:39, LoRA `moss-image-edit.safetensors@1`
+(téléchargée par le preset), offload 'model' encodeur seul, 50 steps, références lues à
+1024 px de grand côté (l'ancien défaut) :
+
+| étape | temps | pic | lecture sur image |
+|---|---|---|---|
+| 0 édit 1 réf, CFG 4 (affiche 1152x1632 lue en 720x1024) | 131,2 s | 23,1 Go | **croissants posés dans le panier, composition et style gardés**, fond blanchi ; textes REDESSINÉS et abîmés : « GRAND OPENNAJ », « SATUIDAY 9 AM · RUE BU PAIN » |
+| 1 idem, CFG 3 | 110,6 s | 18,0 | croissants OK ; textes pires : « GRANOOPENENUG », « SATUDAY 9 AM RUE BLLKIN » |
+| 2 édit 2 réfs (affiche + logo « BEAN THERE ») | 145,6 s | 21,1 | **fuite de la 2e référence** : un badge rond « COFFEE COFFEE » inventé en haut à droite, le texte « BEAN THERE » et le symbole du logo PLAQUÉS sur le panier, bandes noires haut et bas (le cadrage carré du logo) ; « GRAND OPENING » exact cette fois, sous-titre abîmé |
+| 3 édit 1 réf lue à 512 px | 265,8 s | 16,5 | **source perdue** : une autre affiche (photo de pains, charabia « GIR'SK IOOSTILINS » et six lignes inventées) |
+| 4 fond du logo (1024, exemple de l'auteur) | 192,4 s | 21,1 | **parfait** : symbole et « BEAN THERE » intacts au pixel près, plage et mer derrière |
+| 5 contrôle sans LoRA | | | refusé par nom, rien rendu |
+
+Lecture :
+- **Le contrat tient** : la passe de préfixe fonctionne sur les vrais poids (l'exemple de
+  l'auteur est reproduit à l'identique, les croissants remplacent le pain sans toucher à
+  la composition). Critère « un edit aboutit » atteint.
+- **Les textes sont redessinés, pas copiés**, et leur fidélité dépend de la résolution à
+  laquelle la source entre : à 1024 (affiche réduite à 720x1024) des lettres cassent, à
+  512 la source est perdue. La LoRA a été entraînée sur des PAIRES de même taille
+  (source = l'unique référence, cible) : lire la source à sa propre taille est ce que le
+  modèle a vu. **Corrigé** : `moss_edit_ref_max_edge` vaut désormais 2048 (la source à
+  sa taille, l'écart ne peut venir que d'une image au-delà de 2048), aide et onglet
+  réécrits ; le script compare « taille d'origine » contre 1024. CFG 4 (l'auteur) tient
+  mieux les textes que CFG 3 : dit dans l'onglet.
+- **Plusieurs références : expérimental**, dit dans l'onglet, le README et le log (une
+  fois) : la LoRA n'a vu qu'UNE référence à l'entraînement ; la deuxième fuit (contenu et
+  cadrage). La capacité reste (le contrat l'autorise, l'auteur l'annonce), le garde-fou
+  est l'avertissement.
+- **Temps** : 131 s pour l'affiche contre 110 s en texte vers image (le cache K/V du
+  préfixe fait son travail : +20 %). Les 265 s du rendu à 512 (préfixe PLUS petit) et les
+  192 s du logo 1024 (42 s en texte vers image) sont **inexpliqués** : ni le préfixe ni le
+  pic de VRAM ne les justifient ; les deux sont les derniers rendus du passage. Piste :
+  un autre processus sur la carte, ou de la mémoire paginée. Le pipeline logue désormais
+  le temps de la passe du préfixe et la taille du cache (ligne `edit prefix:`), repris
+  dans le rapport ; à relancer en surveillant `nvidia-smi`.
+- Suite : **69 fichiers sur 69** ; smoke 22/22.
+- À faire chez Mike : `git pull`, carte libre, `tools\gpu_lot4b_check.py` (références à
+  leur taille) ; juger les textes de l'étape 0 contre ce premier passage et contre
+  l'étape 3 (1024), et les temps.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)
