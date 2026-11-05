@@ -441,6 +441,18 @@ def native_sigmas(steps, scheduler=None):
 
 
 # --- Layout prompts (lot 2) ------------------------------------------------------------
+def _vram_mark(label):
+    """'<label>: X GB reserved, peak Y GB' on CUDA, '' elsewhere (the peak is the
+    process-wide maximum since the last reset: the caller's scripts reset it per step)."""
+    try:
+        if not torch.cuda.is_available():
+            return ""
+        return (f"{label}: {torch.cuda.memory_reserved() / 1024 ** 3:.1f} GB reserved, "
+                f"peak {torch.cuda.max_memory_reserved() / 1024 ** 3:.1f} GB")
+    except Exception:
+        return ""
+
+
 def encode_swap_setting():
     """config `moss_encode_swap` (default on), env MOSS_ENCODE_SWAP=0 to turn it off."""
     env = os.environ.get("MOSS_ENCODE_SWAP")
@@ -1360,12 +1372,17 @@ class MossPipe:
             finally:
                 self._encoder_out()
             kw["prompt_embeds"], kw["prompt_attention_mask"] = e, m
+        vram = _vram_mark("after the text")
         restore = None
         if emulated:
             callback_on_step_end, restore = self._prepare_emulated(
                 kw, init, mask_image, strength, steps, w, h, generator, callback_on_step_end)
         if refs:
             kw["reference_latents"] = self._reference_latents(refs, w, h)
+        if vram and (emulated or refs):
+            # Which phase sets the peak of an image call (lot 3b: 23.5 GB on a 1.9 Mpx
+            # img2img, the same before and after the text-first reorder): said per call.
+            _log(f"vram: {vram}; {_vram_mark('after the image encode')}")
         if callback_on_step_end is not None:
             kw["callback_on_step_end"] = callback_on_step_end
         self._keep_encoder_offload()
