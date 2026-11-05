@@ -63,10 +63,10 @@ def test_config_sample_matches_the_code_and_starts_on_moss():
     assert "ideogram_model" not in cfg and "ideogram_base_repos" not in cfg
     assert cfg["moss_base_repos"][0] == REPO and "flux3_base_repos" not in cfg
     assert cfg["moss_precision"] == "bf16"
-    # crispz_flux3_dir is this studio's own setting (the Edit in crispz-flux3 tab, lot 5),
-    # not a FLUX.3 leftover
+    # crispz_flux3_dir and crispz_ideogram_dir are this studio's own settings (the Edit in
+    # crispz-flux3 and Compare in crispz-ideogram tabs, lot 5), not leftovers
     for k in cfg:
-        if k.lstrip("_").startswith("crispz_flux3_dir"):
+        if k.lstrip("_").startswith(("crispz_flux3_dir", "crispz_ideogram_dir")):
             continue
         assert "klein_" not in k and "flux3_" not in k and "ideogram_" not in k, k
     with open(os.path.join(ROOT, "preferences.example.json"), encoding="utf-8") as f:

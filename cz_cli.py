@@ -197,8 +197,10 @@ def _xyz_cli_apply(name, value, p, base_ms):
         set_loras([] if lora_name == "None"
                   else [(_path_for_lora(lora_name), float(weight))] + cur[1:])
     elif kind == "performance":
+        from cz_ui import performance_loras
         st, g = PERFORMANCE[value]
         p["gen_steps"], p["guidance"] = int(st), float(g)
+        set_loras(performance_loras(value, base_ms.get("loras")))
     elif kind == "prompt":
         p["prompt"] = str(value)
     elif kind == "sr":

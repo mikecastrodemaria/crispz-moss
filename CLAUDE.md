@@ -1262,6 +1262,52 @@ Lecture :
 - Les images `tests/e2e_*.png` restent à regarder (textes du logo, zone inpaintée), le
   test ne juge que les assertions.
 
+### Livraison 1.0.0 (05/11/2026), décisions de Mike
+
+Décisions reçues après le e2e GPU : fusion de `wip/moss-engine` dans `main`, version
+1.0 (écrite `1.0.0`, forme à trois nombres comme les autres crispz), repo
+`crispz-moss.pinokio` créé par Mike, icône provisoire gardée, preset « Draft (8 steps,
+DMD LoRA) » accepté.
+- **Preset « Draft (8 steps, DMD LoRA) »** [8, 1.0, `moss-dmd-8-steps`] : troisième
+  preset Performance (cz_ui, config-sample). Le troisième élément d'un preset peut
+  désormais nommer un preset de brouillon de `cz_edit_loras` (`DRAFT_LORA_SPECS`,
+  `resolve_draft`) : la LoRA est cherchée dans les dossiers de LoRAs (sous ses noms
+  stables, et sous le nom générique `lora.safetensors` du hub SEULEMENT si l'en-tête
+  safetensors porte la signature DMD, `layers.0.proj.q.lora_down` en [128, 3072] : la
+  copie laissée par `gpu_lot4_check.py` dans `loras/` est donc reconnue), sinon
+  téléchargée une fois (1,2 Go fp32, Apache 2.0, licence dite dans le log) dans
+  `loras/_hf-edit/moss-dmd-8-steps.safetensors`. `_set_performance` la met en slot 1 à
+  1,0 (choix du menu rafraîchis pour que la valeur soit acceptée) ; un autre preset remet
+  le slot 1 à None ; `performance_loras` fait pareil pour l'axe XYZ « Performance » (UI
+  et CLI) en laissant une LoRA de l'utilisateur en place. Téléchargement impossible :
+  repli sur Draft (12 steps), dit dans le log et par un avertissement Gradio. À CFG 1
+  le pipeline ne fait pas de passe inconditionnelle (`do_cfg = guidance != 1`) : ni
+  négatif encodé ni `uncond_skip_layers` à couper. Rien n'est mesuré de plus que le
+  rendu du lot 4 (un seed) : à juger à l'usage, le preset se retire d'un clic.
+  ATTENTION : un `config.txt` local qui a copié `performance_presets` ne voit pas le
+  nouveau preset (ajouter la ligne, ou retirer la clé pour reprendre la liste de l'app).
+- **Six fichiers de tests jamais exécutés par la suite, corrigé.** `run_tests.py` ne
+  passait par pytest que les fichiers qui écrivent `import pytest` ; les autres sont
+  lancés comme des scripts. Six fichiers écrits pour pytest (fixture `monkeypatch`, sans
+  `import pytest` ni bloc `__main__`) étaient donc importés, n'exécutaient rien et
+  passaient : `test_caption` (14), `test_latent_preview` (9), `test_local_tools` (4),
+  `test_lot2_tools` (2), `test_model_profiles` (6), `test_moss_wiring` (17), soit 52
+  tests, en local comme au CI. Trouvé parce que `test_model_profiles` refusait la clé
+  `crispz_ideogram_dir` du lot 5 (son filtre « ideogram_ », admise comme
+  `crispz_flux3_dir`) alors que la suite disait 70 sur 70. Désormais un fichier sans
+  bloc `__main__` passe par pytest quoi qu'il importe. Les 52 tests lancés : tous
+  verts après ce seul correctif (ils avaient été lancés à la main par pytest pendant
+  leurs lots, mais jamais depuis).
+- Tests : `test_edit_lora_presets` +3 (catalogue et config-sample, copie locale reconnue
+  par l'en-tête ou téléchargement unique mocké, radio et axe XYZ, repli sans réseau).
+  Suite complète : **70 fichiers sur 70** ; smoke 22/22 ; `check_config_keys` OK.
+- `APP_VERSION` 1.0.0, README (bannière, preset, Pinokio), CHANGELOG 1.0.0.
+- Launcher : `pinokio/` déplacé dans `mikecastrodemaria/crispz-moss.pinokio` (une seule
+  source, comme pour crispz-ideogram) ; le dossier quitte ce repo.
+- Fusion : `wip/moss-engine` dans `main` en avance rapide (`main` n'avait pas bougé
+  depuis le commit du fork, a4c1a4f). Suite des travaux : depuis `main`, une branche par
+  sujet.
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

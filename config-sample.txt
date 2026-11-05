@@ -62,7 +62,7 @@
     "_live_preview_help": "Show the image as it forms, during the denoise (Fooocus-style), in the Result gallery itself, where the finished image then replaces it. FLUX.2 hands its latents packed (128 channels, one token per 16x16 block) and they are projected straight to RGB through a 128x3 matrix fitted against THIS VAE -- a matmul on the token grid, where a real VAE decode would cost 0.2-0.5 s a step. MOSS-Image shares that VAE and packs its tokens in the same order, so the same matrix applies (error 35 on 255 at the last step, measured on the 5090). It is an approximation (R2 0.88): the composition and the broad colours are right, the fine detail is not. every_n_steps=2 or 3 refreshes less often, max_side caps the image sent to the browser. enabled=false removes the whole thing: no callback on the denoise, no frames, zero cost. Advanced > Generation has the same switch, applied live.",
     "caption_model": "blip-large",
     "_caption_model_help": "Auto-describe model: blip-large (default, local) | blip-base | ollama:<vision model> (listed in Prompt AI once Ollama is detected; blip-large takes over if Ollama fails)",
-    "_performance_presets_help": "name -> [steps, guidance] or [steps, guidance, lora_file]. MOSS-Image: 50 steps and CFG 3.0 (the official settings; 3 to 6 advised, raise it for short prompts). Draft (12 steps) is a quick look on the base model (measured on the 5090, bench/lot3: the texts hold at 12 steps, details may move; 25 s instead of 85 for a 1.9 Mpx poster); the community 4-step LoRA and the 8-step DMD adapter need the LoRA loader (lot 4): the DMD release also replaces the time embedding and samples with its own data-space loop, not the release scheduler.",
+    "_performance_presets_help": "name -> [steps, guidance] or [steps, guidance, lora]: a file of the LoRA folders, or the adapter name of a draft preset ('moss-dmd-8-steps') fetched from the hub once into loras/_hf-edit. MOSS-Image: 50 steps and CFG 3.0 (the official settings; 3 to 6 advised, raise it for short prompts). Draft (12 steps) is a quick look on the base model (measured on the 5090, bench/lot3: the texts hold at 12 steps, details may move; 25 s instead of 85 for a 1.9 Mpx poster). Draft (8 steps, DMD LoRA) ties the lodestones 8-step DMD adapter (Apache 2.0, 1.2 GB) to slot 1 at CFG 1: one DiT pass per step, about 8 to 10 s for the same poster, texts exact on the 5090 (bench/lot4); the LoRA leaves slot 1 again with another preset. The DMD author's full recipe also swaps the time embedding and samples with its own loop: the LoRA alone is used here, and it held on images.",
     "performance_presets": {
         "MOSS (50 steps)": [
             50,
@@ -71,6 +71,11 @@
         "Draft (12 steps)": [
             12,
             3.0
+        ],
+        "Draft (8 steps, DMD LoRA)": [
+            8,
+            1.0,
+            "moss-dmd-8-steps"
         ]
     },
     "_magic_prompt_engine_help": "Magic prompt (plain idea -> MOSS-Image layout draft): 'ollama' = a local Ollama model with the official prompt-enhancer brief and the draft schema as Ollama's structured output (default); 'local' = the loaded Qwen3.5-9B text encoder made generative with its own LM head (Qwen/Qwen3.5-9B, ~2 GB downloaded once into cache/moss/), JSON constrained by outlines when installed. Both run on this machine.",

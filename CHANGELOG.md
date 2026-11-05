@@ -5,7 +5,7 @@ below it are crispz-ideogram's, crispz-flux3's and crispz-klein's history, kept 
 The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browser tab title.
 
 
-## 0.1.0-dev (crispz-moss, in progress) : crispz-ideogram ported to MOSS-Image
+## 1.0.0 (2026-11-05, crispz-moss) : crispz-ideogram ported to MOSS-Image
 
 The specification, decisions and measurements of every lot are in CLAUDE.md.
 
@@ -99,7 +99,17 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   the source and written in the README (MOSS Apache 2.0, Qwen3.5-9B Apache 2.0, FLUX.2
   klein 4B VAE Apache 2.0 at the repo level, the Moss-Image-Edit weights without a stated
   licence); the measurements of every lot; FORK.md updated; the Pinokio launcher
-  prepared in `pinokio/` (to be published as `crispz-moss.pinokio`, provisional icon).
+  published as `crispz-moss.pinokio`. The e2e test passed on the RTX 5090 (4 min 56:
+  load 35 s, 1024 in 83 s as the first render of the process, 1456x1456 in 109 s,
+  img2img 15 s, inpaint 47 s, Stop 2.8 s, peaks 15 to 20.5 GB).
+- **Draft (8 steps, DMD LoRA)** (2026-11-05): a third Performance preset that ties the
+  lodestones 8-step DMD adapter (Apache 2.0) to LoRA slot 1 at CFG 1, fetched once from
+  the hub into `loras/_hf-edit` (a library copy is recognised by its header, even under
+  the hub's generic `lora.safetensors` name), removed again with another preset; the XYZ
+  `Performance` axis and the CLI follow. Measured on the 5090 (lot 4): one DiT pass per
+  step, about 9 s of render for a 1.9 Mpx poster, texts exact. A LoRA that cannot be
+  fetched falls back to Draft (12 steps), said.
+- **1.0.0**: `wip/moss-engine` merged into `main`, `APP_VERSION` 1.0.0.
 
 ## 0.1.0 (2026-11-03, crispz-ideogram) : crispz-flux3 ported to Ideogram 4.0
 

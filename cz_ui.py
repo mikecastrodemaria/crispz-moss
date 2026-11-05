@@ -193,6 +193,7 @@ _LIVE_PREVIEW_POLL = 0.25
 PERFORMANCE = {
     "MOSS (50 steps)": (50, 3.0),
     "Draft (12 steps)": (12, 3.0),
+    "Draft (8 steps, DMD LoRA)": (8, 1.0),
 }
 # Styles. Fooocus format: name -> {"prompt": a template with {prompt} (or None),
 # "negative_prompt": str}. The real library is loaded from styles/*.json (see _load_styles
@@ -300,7 +301,9 @@ import json  # noqa: F811 (utilise par _load_styles ci-dessous)
 # Performance presets, editable through config.txt (performance_presets: name ->
 # [steps, guidance] or [steps, guidance, lora_filename] to tie a LoRA to the preset, e.g.
 # Lightning 8-step).
-PERFORMANCE_LORA = {}
+# The third element may also name a draft preset of cz_edit_loras (its adapter name):
+# that LoRA is fetched from the hub once and tied to the preset (see _performance_lora).
+PERFORMANCE_LORA = {"Draft (8 steps, DMD LoRA)": "moss-dmd-8-steps"}
 if isinstance(CONFIG.get("performance_presets"), dict) and CONFIG["performance_presets"]:
     try:
         PERFORMANCE = {k: (int(v[0]), float(v[1])) for k, v in CONFIG["performance_presets"].items()}
@@ -1493,25 +1496,100 @@ def _ui_set_force_ratio(mode, aspect_name):
     cz_pipeline.set_force_ratio_mode("extend" if m.startswith("extend") else "crop")
 
 
+_PERF_LORA_SAID = set()
+
+
+def _performance_lora(name):
+    """(slot_name, path, weight) of the LoRA a Performance preset carries, or (None,
+    None, None). A third element that names a draft preset of cz_edit_loras (e.g.
+    'moss-dmd-8-steps') is fetched from the hub ONCE when it is not in a LoRA folder,
+    its licence said the first time; any other value is a file of the LoRA folders.
+    Raises when a draft LoRA cannot be fetched (the preset makes no sense without it)."""
+    import cz_edit_loras
+    n = PERFORMANCE_LORA.get(name, "") or ""
+    if not n:
+        return None, None, None
+    spec = cz_edit_loras.draft_spec(n)
+    if spec is None:
+        return n, cz_pipeline.resolve_lora_path(n), float(cz_pipeline.LORA_WEIGHT)
+    path = cz_edit_loras.resolve_draft(n)
+    slot = path
+    for d in cz_pipeline._lora_dirs():
+        try:
+            rel = os.path.relpath(path, d)
+        except ValueError:
+            continue
+        if not rel.startswith(".."):
+            slot = rel.replace(os.sep, "/")
+            break
+    if path not in _PERF_LORA_SAID:
+        _PERF_LORA_SAID.add(path)
+        _log(f"performance preset '{name}': LoRA {os.path.basename(path)}@{spec['weight']:g} "
+             f"({spec['licence']}); it leaves slot 1 again with another preset.")
+    return slot, path, float(spec.get("weight", 1.0))
+
+
+def _is_performance_lora(path):
+    """True when `path` is a LoRA tied to a Performance preset (a draft adapter): the one
+    the XYZ 'Performance' axis removes for a preset that carries none."""
+    import cz_edit_loras
+    base = os.path.basename(str(path or "")).lower()
+    return any(base == s["adapter_name"].lower() + ".safetensors"
+               or base == os.path.basename(s["weights"]).lower()
+               or base in [x.lower() for x in s.get("local_names") or []]
+               for s in cz_edit_loras.DRAFT_LORA_SPECS.values())
+
+
+def performance_loras(name, loras):
+    """The (path, weight) list to run the Performance preset `name` with, from the
+    current list: slot 1 becomes the preset's LoRA when it carries one; a preset without
+    a LoRA removes a preset LoRA left in slot 1 and keeps a user LoRA. Used by the XYZ
+    'Performance' axis in the UI and the CLI."""
+    cur = list(loras or [])
+    _slot, path, w = _performance_lora(name)
+    if path:
+        return [(path, w)] + [pw for pw in cur[1:] if pw[0] != path]
+    if cur and _is_performance_lora(cur[0][0]):
+        return cur[1:]
+    return cur
+
+
 def _set_performance(name, *slot_vals):
     """UI: applies a Performance preset -> (gen_steps, guidance) + its associated LoRA
-    (slot 1) when the preset defines one in config.txt (e.g. 'Lightning' -> the 8-step
-    LoRA).
+    (slot 1) when the preset defines one in config.txt ([steps, guidance, lora]: a file
+    of the LoRA folders, or a draft adapter fetched once, e.g. the 8-step DMD LoRA).
 
     slot_vals = (name2, weight2, name3, weight3, ...): slots 2..N as displayed, which are
     preserved. The number of slots is configurable (lora_slots) -> a variadic signature.
-    Returns (steps, guidance, update(slot1_name), update(slot1_weight)).
+    Returns (steps, guidance, update(slot1_name, choices refreshed), update(slot1_weight)).
+    A draft LoRA that cannot be fetched: said, and the preset falls back to the base
+    model's Draft (12 steps) rather than running 8 steps at CFG 1 without it.
 """
     steps, g = PERFORMANCE.get(name, (8, 0.0))
-    n1 = PERFORMANCE_LORA.get(name, "") or "None"
     w1 = float(cz_pipeline.LORA_WEIGHT)
+    try:
+        n1, _path, w = _performance_lora(name)
+        if n1:
+            w1 = w
+    except Exception as e:
+        _log(f"performance preset '{name}': its LoRA is not available ({e}); "
+             f"falling back to Draft (12 steps) on the base model")
+        try:
+            gr.Warning(f"{name}: LoRA not available ({e}). Using 12 steps at CFG 3.0 instead.")
+        except Exception:
+            pass
+        n1, steps, g = None, 12, 3.0
+    n1 = n1 or "None"
     pairs = [(n1, w1)] + [(slot_vals[i], slot_vals[i + 1])
                           for i in range(0, len(slot_vals) - 1, 2)]
     try:
         set_loras(pairs)
     except Exception as e:
         _log(f"performance preset LoRA apply failed: {e}")
-    return steps, g, gr.update(value=n1), gr.update(value=w1)
+    choices = ["None"] + list_loras()
+    if n1 not in choices:
+        choices.append(n1)
+    return steps, g, gr.update(choices=choices, value=n1), gr.update(value=w1)
 
 
 def _caption_choices(vision_models):
@@ -3553,6 +3631,7 @@ def _xyz_apply(name, value, vals, ms):
     elif kind == "performance":
         st, g = PERFORMANCE[value]
         vals[_Q_IDX["gen_steps"]], vals[18] = int(st), float(g)
+        ms["loras"] = performance_loras(value, ms.get("loras"))
     elif kind == "prompt":
         vals[_Q_IDX["prompt"]] = str(value)
     elif kind == "sr":

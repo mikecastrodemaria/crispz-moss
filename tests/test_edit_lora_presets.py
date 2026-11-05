@@ -195,6 +195,135 @@ def test_picking_a_preset_sets_its_weight_on_the_slider():
         cz_pipeline.set_edit_loras, cz_edit_loras.is_downloaded, cz_ui._edit_lora_choices = real
 
 
+def _dmd_file(path, real=True):
+    """A file under the hub's generic name 'lora.safetensors': the DMD header (a rank-128
+    kohya lora_down on layers.0.proj.q) when real, any other LoRA otherwise."""
+    key = "diffusion_model.layers.0.proj.q.lora_down.weight"
+    t = {key: torch.zeros(128, 3072, dtype=torch.bfloat16)} if real else \
+        {"diffusion_model.layers.0.proj.q.lora_down.weight": torch.zeros(16, 3072)}
+    save_file(t, path)
+
+
+def test_the_draft_preset_ties_the_dmd_lora():
+    """The 'Draft (8 steps, DMD LoRA)' preset: the lodestones adapter (Apache 2.0), 8
+    steps at CFG 1, weight 1.0, found by preset name or adapter name, stored under the
+    stable name; and the UI presets carry it with that adapter name."""
+    s = cz_edit_loras.draft_spec(cz_edit_loras.DRAFT_PRESET)
+    assert s["repo"] == "lodestones/MOSS-Image-SFT-8-steps-dmd" and s["weights"] == "lora.safetensors"
+    assert (s["steps"], s["guidance"], s["weight"]) == (8, 1.0, 1.0)
+    assert "Apache 2.0" in s["licence"]
+    assert cz_edit_loras.draft_spec("moss-dmd-8-steps") is s
+    assert cz_edit_loras.draft_spec("Moss-Image-Edit") is None      # not an edit preset
+    assert cz_edit_loras.spec(cz_edit_loras.DRAFT_PRESET) is None   # and not in the edit catalogue
+    assert cz_edit_loras.draft_local_path("moss-dmd-8-steps").endswith("moss-dmd-8-steps.safetensors")
+    import cz_ui
+    assert cz_ui.PERFORMANCE[cz_edit_loras.DRAFT_PRESET] == (8, 1.0)
+    assert cz_ui.PERFORMANCE_LORA[cz_edit_loras.DRAFT_PRESET] == "moss-dmd-8-steps"
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "config-sample.txt"), encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert cfg["performance_presets"][cz_edit_loras.DRAFT_PRESET] == [8, 1.0, "moss-dmd-8-steps"]
+
+
+def test_the_draft_lora_is_found_by_its_header_or_fetched_once():
+    """A library copy under the generic hub name is taken ONLY when its header is the DMD
+    one (another 'lora.safetensors' is left alone); absent everywhere it is fetched once
+    into _hf-edit under the stable name, the licence said."""
+    import huggingface_hub
+    from cz_core import _log as real_log
+    import cz_edit_loras as E
+    tmp = tempfile.mkdtemp()
+    main, extra = os.path.join(tmp, "loras"), os.path.join(tmp, "civitai")
+    os.makedirs(main)
+    os.makedirs(extra)
+    lines = []
+    seen = []
+    src = os.path.join(tmp, "hub_copy.safetensors")
+    _dmd_file(src)
+
+    def fake_download(repo, filename, **kw):
+        seen.append((repo, filename))
+        return src
+
+    real = (huggingface_hub.hf_hub_download, E.lora_dirs, E.edit_loras_dir, E._log)
+    huggingface_hub.hf_hub_download = fake_download
+    E.lora_dirs = lambda: [main, extra]
+    E.edit_loras_dir = lambda: os.path.join(main, "_hf-edit")
+    E._log = lambda m: lines.append(str(m))
+    try:
+        decoy = os.path.join(extra, "lora.safetensors")
+        _dmd_file(decoy, real=False)
+        assert not E.draft_ready("moss-dmd-8-steps")               # the decoy is not it
+        got = E.resolve_draft(cz_edit_loras.DRAFT_PRESET)
+        assert os.path.samefile(got, E.draft_local_path("moss-dmd-8-steps"))
+        assert seen == [("lodestones/MOSS-Image-SFT-8-steps-dmd", "lora.safetensors")]
+        assert any("Apache 2.0" in m for m in lines)
+        assert E.draft_ready("moss-dmd-8-steps")
+        assert E.resolve_draft("moss-dmd-8-steps") == got and len(seen) == 1   # no second fetch
+        os.remove(got)
+        # a real DMD copy under the generic name (what tools/gpu_lot4_check.py left in
+        # loras/) is recognised by its header, nothing downloaded
+        _dmd_file(decoy, real=True)
+        assert os.path.samefile(E.resolve_draft("moss-dmd-8-steps"), decoy) and len(seen) == 1
+        try:
+            E.resolve_draft("nope")
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("an unknown draft preset must raise")
+    finally:
+        huggingface_hub.hf_hub_download, E.lora_dirs, E.edit_loras_dir, E._log = real
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_picking_the_dmd_preset_fills_slot_1_and_another_preset_clears_it():
+    """The Performance radio: the DMD preset puts its LoRA in slot 1 at its weight (the
+    dropdown's choices refreshed so the value is accepted), 8 steps / CFG 1; the official
+    preset puts slot 1 back to None. The XYZ 'Performance' axis does the same on a
+    settings list, and leaves a user LoRA alone. A LoRA that cannot be fetched: the
+    preset falls back to Draft (12 steps) and says so."""
+    import cz_ui
+    import cz_pipeline as P
+    import cz_edit_loras as E
+    tmp = tempfile.mkdtemp()
+    main = os.path.join(tmp, "loras")
+    os.makedirs(os.path.join(main, "_hf-edit"))
+    dmd = os.path.join(main, "_hf-edit", "moss-dmd-8-steps.safetensors")
+    _dmd_file(dmd)
+    user = os.path.join(main, "mine.safetensors")
+    open(user, "wb").close()
+    lines = []
+    real = (P.LORAS_DIR, P.LORAS, E.lora_dirs, E.edit_loras_dir, cz_ui._log, P._log,
+            P.LORAS_EXTRA_DIRS, E._download)
+    P.LORAS_DIR, P.LORAS_EXTRA_DIRS = main, []
+    E.lora_dirs = lambda: [main]
+    E.edit_loras_dir = lambda: os.path.join(main, "_hf-edit")
+    cz_ui._log = P._log = lambda m: lines.append(str(m))
+    try:
+        steps, g, dd, w = cz_ui._set_performance(E.DRAFT_PRESET, "None", 1.0)
+        assert (steps, g) == (8, 1.0)
+        assert dd["value"] == "_hf-edit/moss-dmd-8-steps.safetensors" and dd["value"] in dd["choices"]
+        assert w["value"] == 1.0
+        assert [(os.path.normpath(p), wt) for p, wt in P.LORAS] == [(os.path.normpath(dmd), 1.0)]
+        assert any("Apache 2.0" in m and "slot 1" in m for m in lines)
+        steps, g, dd, w = cz_ui._set_performance("MOSS (50 steps)", "None", 1.0)
+        assert (steps, g, dd["value"]) == (50, 3.0, "None") and P.LORAS == []
+        # XYZ: a user LoRA in slot 1 survives a plain preset, the preset LoRA does not
+        assert cz_ui.performance_loras("MOSS (50 steps)", [(user, 0.8)]) == [(user, 0.8)]
+        assert cz_ui.performance_loras(E.DRAFT_PRESET, [(user, 0.8), (user, 0.5)])[0] == (dmd, 1.0)
+        assert cz_ui.performance_loras("Draft (12 steps)", [(dmd, 1.0), (user, 0.5)]) == [(user, 0.5)]
+        # the LoRA cannot be fetched: Draft (12 steps) instead, said
+        os.remove(dmd)
+        E._download = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline"))
+        steps, g, dd, w = cz_ui._set_performance(E.DRAFT_PRESET, "None", 1.0)
+        assert (steps, g, dd["value"]) == (12, 3.0, "None")
+        assert any("offline" in m and "Draft (12 steps)" in m for m in lines)
+    finally:
+        (P.LORAS_DIR, P.LORAS, E.lora_dirs, E.edit_loras_dir, cz_ui._log, P._log,
+         P.LORAS_EXTRA_DIRS, E._download) = real
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

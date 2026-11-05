@@ -7,11 +7,12 @@ MOSS-Image (OpenMOSS, Fudan, October 2026) is a 5B open-weights model under **Ap
 renders), it rendered every requested text exactly, faster, and with no licence strings
 attached. The other crispz studios stay better at photos and editing.
 
-> **0.1.0-dev, 2026-11-05.** The six lots of the specification are in: the engine and
-> the single-file loaders, the layout editor, the magic prompt and Describe, the emulated
-> img2img / inpaint / outpaint, LoRAs and editing with references, the local tools and
-> the hand-overs, the GPU end-to-end test and this documentation. The specification and
-> the work log (every measurement, every decision) are in `CLAUDE.md`.
+> **1.0.0, 2026-11-05.** The six lots of the specification are in and measured on an
+> RTX 5090: the engine and the single-file loaders, the layout editor, the magic prompt
+> and Describe, the emulated img2img / inpaint / outpaint, LoRAs and editing with
+> references, the local tools and the hand-overs, the GPU end-to-end test and this
+> documentation. The specification and the work log (every measurement, every decision)
+> are in `CLAUDE.md`.
 
 ## Licence: read this first
 
@@ -37,7 +38,7 @@ crispz-ideogram on this machine.
 
 | | |
 |---|---|
-| **Generate** | MOSS-Image text to image, 50 steps, CFG 3.0 (official settings), a real negative prompt, 256 to 2048 a side, validated from 1 to 2 Mpx |
+| **Generate** | MOSS-Image text to image, 50 steps, CFG 3.0 (official settings), a real negative prompt, 256 to 2048 a side, validated from 1 to 2 Mpx. Performance presets: MOSS (50 steps), Draft (12 steps, the base model) and **Draft (8 steps, DMD LoRA)**: the lodestones 8-step DMD adapter (Apache 2.0, 1.2 GB, fetched once) in slot 1 at CFG 1, one DiT pass per step, texts exact on the 5090; it leaves slot 1 again with another preset |
 | **Layout JSON** | MOSS-Image reads structured layouts: an editor builds them (summary, meta, palette, every text with its exact content and its box), boxes drawn with the mouse on a canvas at the chosen ratio, raw JSON mode. A layout is the guarantee "nothing but these words" |
 | **Design presets** | poster (A series), logo, business card, book cover, slide 16:9, packaging, YouTube thumbnail, story 9:16, banner 6:1, each at its native size |
 | **Magic prompt** | a plain idea into a layout, through Ollama (a local LLM, seconds) or locally with the model's own Qwen3.5-9B encoder and its LM head (about a minute) |
@@ -96,7 +97,7 @@ Windows, torch 2.11 cu128, bf16, offload `auto` (encoder only), 50 steps, CFG 3.
 | img2img 1152x1632, denoise 0.3 / 0.6 | 75 s (first render, new prompt) / 52 s, texts exact at both |
 | Inpaint, outpaint, reframe (work area capped at ~1 Mpx) | 45 s, 47 s, 46 s |
 | Draft, the poster at 12 / 20 / 25 / 50 steps | 25 / 34 / 43 / 85 s, texts exact at every count |
-| LoRAs (DeBand, the DMD LoRA at 8 steps CFG 1) | 100 s, 18 s (about 9 s of render), texts exact |
+| LoRAs (DeBand, the DMD LoRA at 8 steps CFG 1: the Draft (8 steps, DMD LoRA) preset) | 100 s, 18 s (about 9 s of render), texts exact |
 | Edit with references, 1152x1632 poster, CFG 4 / 3 | 170 s / 125 s, 24 GB peak, texts exact; a 1024 logo on a new background 62 s |
 
 A/B against Ideogram 4 (crispz-ideogram's lot 2 posters, 4 seeds each, plain text and
@@ -185,8 +186,8 @@ freshly encoded), 1456x1456 in 109 s, img2img 0.35 in 15 s, inpaint in 47 s, Sto
 
 ## Pinokio
 
-A 1-click launcher lives in `pinokio/` (install, start, update, reset; the same venv
-rules as `install.bat`); it is published as its own repo, `crispz-moss.pinokio`.
+A 1-click launcher (install, start, update, reset; the same venv rules as `install.bat`)
+is published as its own repo: https://github.com/mikecastrodemaria/crispz-moss.pinokio.
 
 ## Credits
 

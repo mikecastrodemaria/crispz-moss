@@ -43,8 +43,13 @@ def main(argv):
         # have no __main__ runner: run as a script they would import, do nothing and pass.
         # They go through pytest, which the CI installs; the klein-era files keep their
         # script runner (the module globals they poke stay isolated per process).
+        # A file WITHOUT a __main__ runner is a pytest file whatever it imports (a
+        # monkeypatch fixture needs no 'import pytest'): run as a script it would pass
+        # without executing one test. Six such files (52 tests) slipped through until
+        # 2026-11-05.
         with open(path, encoding="utf-8", errors="replace") as fh:
-            uses_pytest = "import pytest" in fh.read()
+            src = fh.read()
+        uses_pytest = "import pytest" in src or 'if __name__ == "__main__"' not in src
         cmd = ([sys.executable, "-m", "pytest", path, "-q", "-p", "no:cacheprovider"]
                if uses_pytest else [sys.executable, path])
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",

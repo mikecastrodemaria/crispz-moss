@@ -474,6 +474,103 @@ def resolve_speed(name, omni_model, download=True):
             "path": path, "base": base}
 
 
+# ----------------------------------------------------------------------------
+# Draft presets tied to a distillation LoRA (crispz-moss, lot 4 follow-up). The DMD
+# adapter of lodestones (Apache 2.0) renders a clean image in 8 steps at CFG 1 on the
+# SFT model: measured on the 5090 (bench/lot4), texts exact, one DiT forward per step,
+# about 8 to 10 s for a 1.9 Mpx poster against 22 s for the base model at 12 steps. Its
+# author's full recipe also swaps the time embedding and samples with its own loop; the
+# LoRA alone is what is used here, and it held on images. A Performance preset names
+# the adapter in its third element ([steps, guidance, adapter_name]): the file is looked
+# for in the LoRA folders first, otherwise fetched once from the hub into the _hf-edit
+# folder, and it leaves slot 1 again when another preset is picked.
+# ----------------------------------------------------------------------------
+DRAFT_PRESET = "Draft (8 steps, DMD LoRA)"
+DRAFT_LORA_SPECS = {
+    DRAFT_PRESET: {
+        "repo": "lodestones/MOSS-Image-SFT-8-steps-dmd",
+        "weights": "lora.safetensors",
+        "adapter_name": "moss-dmd-8-steps",
+        "steps": 8, "guidance": 1.0, "weight": 1.0,
+        "licence": "Apache 2.0 (model card of lodestones/MOSS-Image-SFT-8-steps-dmd)",
+        # The hub file is called lora.safetensors: a name any LoRA may carry, so a
+        # library copy under that name is taken only when its header is the DMD one.
+        "local_names": ["moss-dmd-8-steps.safetensors", "MOSS-Image-SFT-8-steps-dmd.safetensors",
+                        "moss_image_sft_8_steps_dmd.safetensors"],
+        "signature": ("diffusion_model.layers.0.proj.q.lora_down.weight", [128, 3072]),
+    },
+}
+
+
+def draft_spec(name):
+    """The draft preset named `name` (preset name or adapter name, case-insensitive),
+    otherwise None."""
+    key = str(name or "").strip().lower()
+    for n, s in DRAFT_LORA_SPECS.items():
+        if key in (n.lower(), s["adapter_name"].lower()):
+            return s
+    return None
+
+
+def draft_local_path(name):
+    s = draft_spec(name)
+    return None if s is None else os.path.join(edit_loras_dir(), s["adapter_name"] + ".safetensors")
+
+
+def _has_signature(path, signature):
+    """True when the safetensors header of `path` carries the (key, shape) given: how a
+    library file under a generic name is told from any other LoRA, without loading it."""
+    try:
+        from safetensors import safe_open
+        key, shape = signature
+        with safe_open(path, framework="pt") as f:
+            if key not in f.keys():
+                return False
+            return list(f.get_slice(key).get_shape()) == list(shape)
+    except Exception as e:
+        _dbg(f"draft LoRA: cannot read {path}: {e}")
+        return False
+
+
+def draft_available_path(name, index=None):
+    """The local path of the draft LoRA when it is already on disk (the _hf-edit folder
+    or a LoRA library), otherwise None. Never downloads."""
+    s = draft_spec(name)
+    if s is None:
+        return None
+    p = draft_local_path(name)
+    if os.path.isfile(p):
+        return p
+    found = find_local(list(s.get("local_names") or []), index=index)
+    if found:
+        return found
+    generic = find_local([os.path.basename(s["weights"])], index=index)
+    if generic and _has_signature(generic, s["signature"]):
+        return generic
+    return None
+
+
+def draft_ready(name, index=None):
+    return draft_available_path(name, index=index) is not None
+
+
+def resolve_draft(name, download=True, progress=None):
+    """The local path of a draft preset's LoRA; fetched from the hub when absent (and
+    download=True). KeyError for an unknown preset, FileNotFoundError when absent and
+    download=False, RuntimeError when the download fails."""
+    s = draft_spec(name)
+    if s is None:
+        raise KeyError(f"unknown draft preset: {name!r} (known: {', '.join(DRAFT_LORA_SPECS)})")
+    found = draft_available_path(name)
+    if found:
+        return found
+    dst = draft_local_path(name)
+    if not download:
+        raise FileNotFoundError(dst)
+    _log(f"draft LoRA: {s['licence']}")
+    return _download(s, dst, progress)
+
+
 def _download(s, dst, progress=None):
     """hf_hub_download -> an atomic copy to dst (a stable ASCII name). A 'civitai' spec
     goes through cz_civitai.download_model_file instead (streamed, SHA256 checked against
