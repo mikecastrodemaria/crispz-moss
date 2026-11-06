@@ -499,6 +499,38 @@ DRAFT_LORA_SPECS = {
                         "moss_image_sft_8_steps_dmd.safetensors"],
         "signature": ("diffusion_model.layers.0.proj.q.lora_down.weight", [128, 3072]),
     },
+    # akhaliq's "Turbo" distillation (Apache 2.0, warm-started from the DMD above, same
+    # kohya keys): Euler-native, i.e. made for the release scheduler (its 4-step anchors
+    # are exactly our scheduler's timesteps at 4 steps: 1000 / 910 / 717 / 24), CFG 1.
+    # Trained at 1024 squared only: the author's table asks for 6 steps around 1536 and
+    # 8 at 2048 (steps_by_pixels, applied at render time, never lowered). He keeps the
+    # LoRA UNMERGED in fp32 (the delta is smaller than bf16's rounding step; merged in
+    # bf16 the fine text goes first): fp32 keeps our buffers in the file's dtype. The
+    # hub file is the generic lora.safetensors again, with the DMD's exact header: no
+    # signature match here, only the stable and the versioned names are trusted.
+    "Draft (4 steps, Turbo LoRA)": {
+        "repo": "akhaliq/MOSS-Image-SFT-4-steps",
+        "weights": "lora.safetensors",
+        "adapter_name": "moss-turbo-4-steps",
+        "steps": 4, "guidance": 1.0, "weight": 1.0,
+        "licence": "Apache 2.0 (model card of akhaliq/MOSS-Image-SFT-4-steps)",
+        "local_names": ["moss-turbo-4-steps.safetensors", "moss_image_sft_4step_v2.0.safetensors"],
+        "fp32": True,
+        "steps_by_pixels": [(1024 * 1024, 4), (1536 * 1536, 6), (None, 8)],
+    },
+    "Draft (3 steps, Turbo LoRA)": {
+        "repo": "akhaliq/MOSS-Image-SFT-4-steps",
+        "weights": "lora_3step.safetensors",
+        "adapter_name": "moss-turbo-3-steps",
+        "steps": 3, "guidance": 1.0, "weight": 1.0,
+        "licence": "Apache 2.0 (model card of akhaliq/MOSS-Image-SFT-4-steps)",
+        "local_names": ["moss-turbo-3-steps.safetensors", "lora_3step.safetensors",
+                        "moss_image_sft_3step_v1.0.safetensors"],
+        "fp32": True,
+        # the author measured the 4-step above 1 Mpx, not the 3-step: the same rule is
+        # applied (said in the help), a 3-step render above 1 Mpx is uncharted
+        "steps_by_pixels": [(1024 * 1024, 3), (1536 * 1536, 6), (None, 8)],
+    },
 }
 
 
@@ -544,14 +576,65 @@ def draft_available_path(name, index=None):
     found = find_local(list(s.get("local_names") or []), index=index)
     if found:
         return found
-    generic = find_local([os.path.basename(s["weights"])], index=index)
-    if generic and _has_signature(generic, s["signature"]):
-        return generic
+    if s.get("signature"):
+        generic = find_local([os.path.basename(s["weights"])], index=index)
+        if generic and _has_signature(generic, s["signature"]):
+            return generic
     return None
 
 
 def draft_ready(name, index=None):
     return draft_available_path(name, index=index) is not None
+
+
+def draft_spec_for_path(path):
+    """The draft preset a LoRA FILE belongs to (by its stable, versioned or hub name),
+    otherwise None. What the loader and the step rule ask about an applied file."""
+    base = os.path.basename(str(path or "")).lower()
+    if not base:
+        return None
+    for s in DRAFT_LORA_SPECS.values():
+        names = [s["adapter_name"].lower() + ".safetensors"] + [x.lower() for x in s.get("local_names") or []]
+        if s.get("signature"):
+            names.append(os.path.basename(s["weights"]).lower())
+        if base in names:
+            return s
+    return None
+
+
+def keep_fp32(path):
+    """True when the draft preset this file belongs to asks for fp32 buffers."""
+    s = draft_spec_for_path(path)
+    return bool(s and s.get("fp32"))
+
+
+def draft_steps(width, height, steps, loras):
+    """The step count to run at: `steps`, RAISED to what the applied draft LoRA's
+    steps_by_pixels table asks for at this size (never lowered: a user who asked for
+    more keeps them). Returns (steps, note); note names the rule when it changed
+    something, else None."""
+    px = int(width) * int(height)
+    for path, _w in list(loras or []):
+        s = draft_spec_for_path(path)
+        table = (s or {}).get("steps_by_pixels")
+        if not table:
+            continue
+        need, first = table[-1][1], True
+        for limit, n in table:
+            if limit is None or px <= limit:
+                need = n
+                break
+            first = False
+        if int(steps) < need:
+            base = os.path.basename(path)
+            if first:
+                return need, (f"{base} was trained for exactly {need} steps: {need} instead "
+                              f"of {int(steps)}")
+            return need, (f"{base}: {int(width)}x{int(height)} is above the LoRA's 1024x1024 "
+                          f"training size, {need} steps instead of {int(steps)} (the "
+                          f"author's table; fewer steps turn hazy)")
+        return int(steps), None
+    return int(steps), None
 
 
 def resolve_draft(name, download=True, progress=None):

@@ -4900,6 +4900,25 @@ def describe_local(image):
     return out
 
 
+_DRAFT_STEPS_SAID = set()
+
+
+def _draft_steps(w, h, steps):
+    """A few-step draft LoRA in the active set (the Turbo presets) was trained at
+    1024x1024: above that its author's table asks for more steps, applied here and said
+    once per (file, size). Never lowers what was asked."""
+    try:
+        import cz_edit_loras
+        n, note = cz_edit_loras.draft_steps(w, h, steps, LORAS)
+    except Exception as e:
+        _dbg(f"draft step rule skipped: {e}")
+        return int(steps)
+    if note and (note, w, h) not in _DRAFT_STEPS_SAID:
+        _DRAFT_STEPS_SAID.add((note, w, h))
+        _log(f"draft LoRA: {note}")
+    return int(n)
+
+
 @_gpu_serial
 def generate(prompt, width, height, steps, seed, negative_prompt=""):
     """FLUX.3 txt2img: generates an image from a prompt. Distilled checkpoint: 16 steps,
@@ -4908,6 +4927,7 @@ def generate(prompt, width, height, steps, seed, negative_prompt=""):
     pipe = get_pipe("txt2img")
     w = round_to_multiple(int(width))
     h = round_to_multiple(int(height))
+    steps = _draft_steps(w, h, steps)
     _log(f"txt2img: {w}x{h}, {int(steps)} steps, cfg {GUIDANCE:.1f} ...")
     _dbg(f"txt2img seed={seed} dtype=bf16 device={DEVICE} offload={OFFLOAD_MODE} "
          f"transformer={'single-file' if ZIMAGE_TRANSFORMER else 'repo'}")

@@ -279,21 +279,31 @@ def unload(transformer):
     return n
 
 
-def _buf(mod, name, t):
+def _buf(mod, name, t, keep_dtype=False):
+    """Registers `t` as a buffer of `mod`, on the module's device and in its dtype
+    (bf16 on the DiT), or in the tensor's own dtype when keep_dtype (an fp32 LoRA whose
+    delta is smaller than bf16's rounding step: the hook then runs that matmul in fp32
+    and casts the result)."""
     ref = getattr(mod, "weight", None)
     dev = ref.device if ref is not None else torch.device("cpu")
-    dt = ref.dtype if ref is not None and ref.is_floating_point() else torch.float32
+    if keep_dtype and t.is_floating_point():
+        dt = t.dtype
+    else:
+        dt = ref.dtype if ref is not None and ref.is_floating_point() else torch.float32
     mod.register_buffer(name, t.detach().to(dev, dt), persistent=False)
     return getattr(mod, name)
 
 
-def apply(transformer, loras):
+def apply(transformer, loras, fp32=()):
     """Applies [(path, weight), ...] on the DiT (the previous set removed first).
     Returns one summary per file: {"path", "weight", "modules", "unknown", "split",
-    "diffs", "norms"}. Raises on an unreadable file."""
+    "diffs", "norms"}. Raises on an unreadable file. Files listed in `fp32` keep their
+    tensors in their own dtype instead of the DiT's (said in the log)."""
     unload(transformer)
     reports = []
+    fp32 = {os.path.abspath(str(p)) for p in (fp32 or ())}
     for li, (path, weight) in enumerate(loras):
+        keep = os.path.abspath(str(path)) in fp32
         lf = read_file(path)
         if lf.full:
             raise ValueError(refusal(path))
@@ -310,15 +320,15 @@ def apply(transformer, loras):
                 r = it["down"].shape[0]
                 base = (float(it["alpha"]) / r) if it.get("alpha") else 1.0
                 idx = len(getattr(mod, "_cz_lr", ()))
-                d = _buf(mod, f"_cz_lora_{li}_{idx}_down", it["down"])
-                u = _buf(mod, f"_cz_lora_{li}_{idx}_up", it["up"])
+                d = _buf(mod, f"_cz_lora_{li}_{idx}_down", it["down"], keep)
+                u = _buf(mod, f"_cz_lora_{li}_{idx}_up", it["up"], keep)
                 mod._cz_lr = list(getattr(mod, "_cz_lr", ())) + [(d, u, base * float(weight))]
                 mod._cz_scales = list(getattr(mod, "_cz_scales", ())) + [("lr", idx, li, base)]
                 touched = True
             if "diff" in it:
                 if is_linear:
                     idx = len(getattr(mod, "_cz_df", ()))
-                    d = _buf(mod, f"_cz_lora_{li}_{idx}_diff", it["diff"])
+                    d = _buf(mod, f"_cz_lora_{li}_{idx}_diff", it["diff"], keep)
                     mod._cz_df = list(getattr(mod, "_cz_df", ())) + [(d, float(weight))]
                     mod._cz_scales = list(getattr(mod, "_cz_scales", ())) + [("df", idx, li, 1.0)]
                     rep["diffs"] += 1
@@ -332,7 +342,7 @@ def apply(transformer, loras):
                     touched = True
             if "diff_b" in it and is_linear:        # an output offset, bias or not
                 idx = len(getattr(mod, "_cz_db", ()))
-                b = _buf(mod, f"_cz_lora_{li}_{idx}_diffb", it["diff_b"])
+                b = _buf(mod, f"_cz_lora_{li}_{idx}_diffb", it["diff_b"], keep)
                 mod._cz_db = list(getattr(mod, "_cz_db", ())) + [(b, float(weight))]
                 mod._cz_scales = list(getattr(mod, "_cz_scales", ())) + [("db", idx, li, 1.0)]
                 touched = True
@@ -347,7 +357,8 @@ def apply(transformer, loras):
         msg = (f"LoRA {name} @ {float(weight):g}: {rep['modules']} module(s)"
                + (f", {rep['split']} fused qkv split" if rep["split"] else "")
                + (f", {rep['diffs']} weight diff(s)" if rep["diffs"] else "")
-               + (f", {rep['norms']} norm diff(s)" if rep["norms"] else ""))
+               + (f", {rep['norms']} norm diff(s)" if rep["norms"] else "")
+               + (", tensors kept in their own dtype (fp32)" if keep else ""))
         if rep["unknown"] or rep["missing"]:
             msg += (f"; NOT applied: {len(rep['unknown'])} unknown key(s), "
                     f"{len(rep['missing'])} module(s) not in this DiT"

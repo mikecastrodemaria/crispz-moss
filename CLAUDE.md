@@ -1368,6 +1368,51 @@ le ratio des Settings au lieu de ceux de Ref 1.
   **Styles** du panneau Advanced, sous la liste des styles (le catalogue nourrit les
   prompts : personnages et styles), plus dans Save. README mis à jour.
 
+### Presets « Draft (4 steps, Turbo LoRA) » et « Draft (3 steps, Turbo LoRA) » (06/11/2026, demande de Mike)
+
+Mike demande si `akhaliq/MOSS-Image-SFT-4-steps` est utilisable. Relevé (fiche, en-têtes
+safetensors et `apply_lora.py` lus le 06/11/2026) : LoRA kohya rang 128 alpha 128 fp32
+sur `proj.{q,k,v,o,ffn_up_gate,ffn_down}`, 756 tenseurs, exactement les clés de la LoRA
+DMD de lodestones dont elle est dérivée ; Apache 2.0, usage commercial dit ; « Euler-
+native » : faite pour le scheduler de sortie à 4 steps CFG 1, ancres 1000 / 910 / 717 /
+24, et notre scheduler vendorisé donne exactement ces timesteps à 4 steps (vérifié) ;
+scheduler du repo identique au nôtre. Variante 3 steps (`lora_3step.safetensors`) =
+brouillon ; 2 steps = échec documenté. Entraînée à 1024² seulement : au-dessus, 6 steps
+vers 1536, 8 à 2048 (table de l'auteur, mesurée sur le 4-step) ; un prompt long tient
+mieux qu'un court au-delà de 1024. L'auteur garde la LoRA NON fusionnée en fp32 (delta
+sous le pas d'arrondi bf16 ; fusionnée en bf16, le texte fin part en premier). Le repo
+contient aussi un DiT fp32 fusionné (20 Go), un encodeur et un VAE recopiés de la base :
+inutiles ici.
+- `cz_edit_loras.DRAFT_LORA_SPECS` : deux specs de plus (`moss-turbo-4-steps`,
+  `moss-turbo-3-steps`), `fp32: True`, `steps_by_pixels` [(1 Mpx, 4 ou 3), (1536², 6),
+  (au-delà, 8)]. Le `lora.safetensors` générique du hub n'est PAS accepté pour le Turbo
+  (même en-tête que le DMD : indiscernable) : `draft_available_path` ne fait la
+  recherche par signature que si la spec en porte une ; noms stables et versionnés
+  seulement (`moss_image_sft_4step_v2.0.safetensors`, `lora_3step.safetensors`,
+  `moss_image_sft_3step_v1.0.safetensors`). `draft_spec_for_path`, `keep_fp32`,
+  `draft_steps(width, height, steps, loras)` (jamais abaissé ; note « entraînée pour
+  exactement N steps » sous 1 Mpx, « au-dessus de la taille d'entraînement » au-delà).
+- `cz_moss_lora._buf(..., keep_dtype)` et `apply(..., fp32=[chemins])` : les tenseurs
+  d'un fichier fp32 restent en fp32 à côté du DiT bf16, le hook fait cette matmul en
+  fp32 et recaste (il le faisait déjà via `x.to(d.dtype)`) ; dit dans le log.
+  `MossPipe.set_loras` demande au catalogue (`keep_fp32`) fichier par fichier.
+- `cz_pipeline._draft_steps` dans `generate` : la règle de l'auteur appliquée au rendu
+  (UI, CLI, XYZ, protocole), dite une fois par (fichier, taille). Le slider affiche les
+  4 steps du preset, le log dit le nombre réel ; pas de règle en img2img (fraction d'un
+  planning de toute façon).
+- UI : deux presets de plus (cinq en tout), aide de la radio réécrite ; config-sample ;
+  README (tableau et paragraphe Turbo) ; CHANGELOG.
+- Tests : `test_moss_lora` +1 (fp32 gardé sur demande, le pipe le demande pour un
+  fichier au nom Turbo, pas pour un autre), `test_edit_lora_presets` +1 (specs, noms,
+  générique refusé pour le Turbo et accepté pour le DMD, règle des steps aux trois
+  paliers, jamais abaissé, presets UI et config), `test_flux3_wiring` +1 (`generate`
+  monte 2 à 4 steps sous 1 Mpx et le dit une fois par taille, rien pour une LoRA
+  quelconque). Suite : **70 fichiers sur 70** ; smoke 22/22 ; `check_config_keys` OK.
+- Non mesuré sur la carte. À faire chez Mike : `git pull`, preset « Draft (4 steps,
+  Turbo LoRA) » sur l'affiche (1152x1632 : le log doit dire 6 steps), puis le 3 steps,
+  quelques seeds, textes et sujets à juger contre le DMD 8 steps ; si le Turbo tient,
+  retirer le preset DMD (décision de Mike).
+
 ## 10. Sources
 
 - https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (pipeline, configs, LICENSE)

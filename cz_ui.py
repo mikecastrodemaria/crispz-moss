@@ -194,6 +194,8 @@ PERFORMANCE = {
     "MOSS (50 steps)": (50, 3.0),
     "Draft (12 steps)": (12, 3.0),
     "Draft (8 steps, DMD LoRA)": (8, 1.0),
+    "Draft (4 steps, Turbo LoRA)": (4, 1.0),
+    "Draft (3 steps, Turbo LoRA)": (3, 1.0),
 }
 # Styles. Fooocus format: name -> {"prompt": a template with {prompt} (or None),
 # "negative_prompt": str}. The real library is loaded from styles/*.json (see _load_styles
@@ -303,7 +305,9 @@ import json  # noqa: F811 (utilise par _load_styles ci-dessous)
 # Lightning 8-step).
 # The third element may also name a draft preset of cz_edit_loras (its adapter name):
 # that LoRA is fetched from the hub once and tied to the preset (see _performance_lora).
-PERFORMANCE_LORA = {"Draft (8 steps, DMD LoRA)": "moss-dmd-8-steps"}
+PERFORMANCE_LORA = {"Draft (8 steps, DMD LoRA)": "moss-dmd-8-steps",
+                    "Draft (4 steps, Turbo LoRA)": "moss-turbo-4-steps",
+                    "Draft (3 steps, Turbo LoRA)": "moss-turbo-3-steps"}
 if isinstance(CONFIG.get("performance_presets"), dict) and CONFIG["performance_presets"]:
     try:
         PERFORMANCE = {k: (int(v[0]), float(v[1])) for k, v in CONFIG["performance_presets"].items()}
@@ -5026,7 +5030,12 @@ def build_ui():
                                                label="Performance",
                                                info="Sets steps and guidance. MOSS = the official "
                                                     "50 steps at CFG 3.0. Draft = fewer steps, a quick "
-                                                    "look (the texts hold, details may move).")
+                                                    "look (the texts hold, details may move). The LoRA "
+                                                    "presets fetch their adapter once (Apache 2.0) into "
+                                                    "LoRA slot 1 and run at CFG 1; Turbo was trained at "
+                                                    "1024x1024: above that the steps are raised at "
+                                                    "render time (6 around 1536, 8 at 2048), said in "
+                                                    "the log.")
                         aspect = gr.Dropdown(list(ASPECT_RATIOS),
                                              value=CONFIG.get("default_aspect_ratio", "1024 x 1024  (1:1)"),
                                              label="Aspect ratio",

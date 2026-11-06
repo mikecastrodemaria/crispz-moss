@@ -324,6 +324,62 @@ def test_picking_the_dmd_preset_fills_slot_1_and_another_preset_clears_it():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_the_turbo_presets_are_euler_native_fp32_and_raise_steps_above_1_mpx():
+    """akhaliq's Turbo adapters (Apache 2.0): 4 and 3 steps at CFG 1, kept in fp32, the
+    hub's generic lora.safetensors NOT taken for them (it has the DMD's exact header),
+    only their stable and versioned names; the author's table raises the steps above
+    1024x1024 (6 around 1536, 8 at 2048), never lowers them; the UI and the sample
+    config carry both presets."""
+    import cz_ui
+    E = cz_edit_loras
+    s4, s3 = E.draft_spec("moss-turbo-4-steps"), E.draft_spec("moss-turbo-3-steps")
+    assert s4["repo"] == "akhaliq/MOSS-Image-SFT-4-steps" and s4["weights"] == "lora.safetensors"
+    assert s3["weights"] == "lora_3step.safetensors"
+    assert (s4["steps"], s4["guidance"], s3["steps"], s3["guidance"]) == (4, 1.0, 3, 1.0)
+    assert s4["fp32"] and s3["fp32"] and "Apache 2.0" in s4["licence"]
+    assert "signature" not in s4 and "signature" not in s3
+    # names -> spec
+    assert E.draft_spec_for_path("/x/moss-turbo-4-steps.safetensors") is s4
+    assert E.draft_spec_for_path("/x/moss_image_sft_3step_v1.0.safetensors") is s3
+    assert E.draft_spec_for_path("/x/lora_3step.safetensors") is s3
+    assert E.draft_spec_for_path("/x/lora.safetensors") is E.draft_spec("moss-dmd-8-steps")  # the DMD's generic name
+    assert E.draft_spec_for_path("/x/mine.safetensors") is None and not E.keep_fp32("/x/mine.safetensors")
+    # a library lora.safetensors with the DMD header is NOT the turbo adapter
+    tmp = tempfile.mkdtemp()
+    real = (E.lora_dirs, E.edit_loras_dir)
+    E.lora_dirs = lambda: [tmp]
+    E.edit_loras_dir = lambda: os.path.join(tmp, "_hf-edit")
+    try:
+        _dmd_file(os.path.join(tmp, "lora.safetensors"))
+        assert E.draft_ready("moss-dmd-8-steps") and not E.draft_ready("moss-turbo-4-steps")
+        open(os.path.join(tmp, "moss_image_sft_4step_v2.0.safetensors"), "wb").close()
+        assert E.draft_ready("moss-turbo-4-steps")
+    finally:
+        E.lora_dirs, E.edit_loras_dir = real
+        shutil.rmtree(tmp, ignore_errors=True)
+    # the step rule
+    turbo = [("/x/moss-turbo-4-steps.safetensors", 1.0)]
+    assert E.draft_steps(1024, 1024, 4, turbo) == (4, None)
+    n, note = E.draft_steps(1152, 1632, 4, turbo)
+    assert n == 6 and "1152x1632" in note and "6 steps" in note
+    assert E.draft_steps(512, 512, 2, turbo)[1].endswith("exactly 4 steps: 4 instead of 2")
+    assert E.draft_steps(2048, 2048, 4, turbo)[0] == 8
+    assert E.draft_steps(1536, 1536, 4, turbo)[0] == 6
+    assert E.draft_steps(2048, 2048, 12, turbo) == (12, None)          # never lowered
+    assert E.draft_steps(1152, 1632, 3, [("/x/lora_3step.safetensors", 1.0)])[0] == 6
+    assert E.draft_steps(2048, 2048, 2, [("/x/mine.safetensors", 1.0)]) == (2, None)
+    assert E.draft_steps(2048, 2048, 8, [("/x/lora.safetensors", 1.0)]) == (8, None)   # DMD: no table
+    # the presets
+    assert cz_ui.PERFORMANCE["Draft (4 steps, Turbo LoRA)"] == (4, 1.0)
+    assert cz_ui.PERFORMANCE["Draft (3 steps, Turbo LoRA)"] == (3, 1.0)
+    assert cz_ui.PERFORMANCE_LORA["Draft (3 steps, Turbo LoRA)"] == "moss-turbo-3-steps"
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "config-sample.txt"), encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert cfg["performance_presets"]["Draft (4 steps, Turbo LoRA)"] == [4, 1.0, "moss-turbo-4-steps"]
+    assert cfg["performance_presets"]["Draft (3 steps, Turbo LoRA)"] == [3, 1.0, "moss-turbo-3-steps"]
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

@@ -86,6 +86,27 @@ def test_generate_omni_edits_one_and_two_references(engine):
         P.generate_omni([], "x", "", 0, 0, 1, 7)
 
 
+def test_generate_raises_the_steps_of_a_turbo_draft_above_its_training_size(engine, monkeypatch):
+    """A Turbo draft LoRA in the active set (even when its file is missing: the rule
+    reads the names) makes generate run the author's step count above 1024x1024, said
+    once per size; a plain LoRA or a bigger step count leaves everything alone."""
+    lines = []
+    monkeypatch.setattr(P, "_log", lambda m: lines.append(str(m)))
+    monkeypatch.setattr(P, "LORAS", [("/nowhere/moss-turbo-4-steps.safetensors", 1.0)])
+    P._DRAFT_STEPS_SAID.clear()
+    img = P.generate("a cube", 64, 48, 2, 7)              # 64x48: within 1 Mpx -> 4 steps
+    assert img.size == (64, 48)
+    assert any("txt2img: 64x48, 4 steps" in m for m in lines)
+    said = [m for m in lines if "draft LoRA:" in m]
+    assert len(said) == 1 and "exactly 4 steps" in said[0], said
+    P.generate("a cube", 64, 48, 2, 7)
+    assert sum("draft LoRA:" in m for m in lines) == 1     # said once per size
+    monkeypatch.setattr(P, "LORAS", [("/nowhere/mine.safetensors", 1.0)])
+    lines.clear()
+    P.generate("a cube", 64, 48, 2, 7)
+    assert any("txt2img: 64x48, 2 steps" in m for m in lines)
+
+
 def test_edit_output_size_switch(engine, monkeypatch):
     """The 'Output size from Settings' checkbox of the Edit tab: off (the default) the
     result takes Ref 1's size whatever the Settings say, on it takes the Settings width /

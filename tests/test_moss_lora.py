@@ -196,6 +196,41 @@ def test_the_pipe_applies_them_and_the_render_changes(tmp_path):
         pipe.load_lora_weights(p)
 
 
+def test_fp32_files_keep_their_dtype_and_the_pipe_asks_the_catalogue(tmp_path):
+    """apply(fp32=[path]) keeps an fp32 file's tensors in fp32 next to a bf16 DiT (the
+    hook runs that matmul in fp32 and casts the result); a file named after a Turbo
+    draft preset gets it through MossPipe.set_loras without being asked; any other
+    file lands in the DiT's dtype as before."""
+    tr = tiny_transformer().to(torch.bfloat16)
+    down, up = _rand(4, DIM, seed=1).float(), _rand(DIM, 4, seed=2).float()
+    sd = {"diffusion_model.layers.0.proj.q.lora_down.weight": down,
+          "diffusion_model.layers.0.proj.q.lora_up.weight": up,
+          "diffusion_model.layers.0.proj.q.alpha": torch.tensor(4.0)}
+    plain = _save(tmp_path, "plain.safetensors", sd)
+    turbo = _save(tmp_path, "moss-turbo-4-steps.safetensors", sd)
+    L.apply(tr, [(plain, 1.0)])
+    d, u, _s = tr.layers[0].proj["q"]._cz_lr[0]
+    assert d.dtype == torch.bfloat16 and u.dtype == torch.bfloat16
+    L.apply(tr, [(plain, 1.0)], fp32=[plain])
+    d, u, _s = tr.layers[0].proj["q"]._cz_lr[0]
+    assert d.dtype == torch.float32 and u.dtype == torch.float32
+    x = _rand(1, 5, DIM, seed=3).to(torch.bfloat16)
+    out = tr.layers[0].proj["q"](x)
+    assert out.dtype == torch.bfloat16                      # the hook casts back
+    L.unload(tr)
+    import cz_edit_loras
+    assert cz_edit_loras.keep_fp32(turbo) and not cz_edit_loras.keep_fp32(plain)
+    pipe = tiny_pipe()
+    pipe.transformer.to(torch.bfloat16)
+    pipe.set_loras([(turbo, 1.0)])
+    d, u, _s = pipe.transformer.layers[0].proj["q"]._cz_lr[0]
+    assert d.dtype == torch.float32
+    pipe.set_loras([(plain, 1.0)])
+    d, u, _s = pipe.transformer.layers[0].proj["q"]._cz_lr[0]
+    assert d.dtype == torch.bfloat16
+    pipe.set_loras([])
+
+
 def test_cz_pipeline_routes_loras_to_the_adapter(tmp_path, monkeypatch):
     """cz_pipeline.LORAS -> _apply_loras -> MossPipe.set_loras; a refused file is skipped
     with its reason, a missing one ignored, and _clear_loras empties the set."""

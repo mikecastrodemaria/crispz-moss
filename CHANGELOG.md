@@ -116,6 +116,15 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   `SyntaxError: Unexpected token '('` at load and none of the event handlers were
   installed (the Advanced checkbox did nothing, nor the presets). The bridge now lives
   inside the function; a test compiles the page JS the way Gradio does.
+- **Draft (4 steps, Turbo LoRA) and Draft (3 steps, Turbo LoRA)** (2026-11-06, asked
+  by Mike): akhaliq's Euler-native Turbo adapters (`akhaliq/MOSS-Image-SFT-4-steps`,
+  Apache 2.0, kohya keys, warm-started from the DMD) as two more Performance presets at
+  CFG 1 on the stock scheduler (the 4-step anchors are our 4-step timesteps 1000 / 910 /
+  717 / 24). Kept unmerged in fp32 (`cz_moss_lora.apply(fp32=...)`, asked by the
+  catalogue per file). Trained at 1024x1024: `generate` raises the step count above
+  that from the author's table (6 around 1536, 8 at 2048), said once per size, never
+  lowered. The hub's generic `lora.safetensors` is not taken for the Turbo (same header
+  as the DMD): stable and versioned names only. Not measured on the 5090 yet.
 - **Edit (references): "Output size from Settings"** (2026-11-05, asked by Mike, as in
   crispz-klein): a checkbox of the Edit tab; off (default) the result takes Ref 1's size
   and ratio, on it takes the Settings width / height and aspect ratio (Ref 1 read at its

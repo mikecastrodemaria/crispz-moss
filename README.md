@@ -129,13 +129,28 @@ the third one, a LoRA). Measured on the RTX 5090 on the poster preset (1152x1632
 | **MOSS (50 steps)** | 50 / 3.0 | the official settings, the final render | about 85 s (110 s with the first encoding) |
 | **Draft (12 steps)** | 12 / 3.0 | a quick look on the base model: the texts held at 12 steps on every poster measured, the composition and the details may move against the 50-step render of the same seed | about 18 to 22 s |
 | **Draft (8 steps, DMD LoRA)** | 8 / 1.0 + LoRA | the lodestones 8-step DMD adapter in LoRA slot 1 at 1.0, CFG 1 (one DiT pass per step, no negative branch): a clean, complete image with exact texts on the measured seed | about 9 s of render |
+| **Draft (4 steps, Turbo LoRA)** | 4 / 1.0 + LoRA | akhaliq's Euler-native Turbo adapter (warm-started from the DMD, trained on the release scheduler: its anchors are exactly our 4-step timesteps), the author's "final" tier, the best text of the few-step adapters by his own strips | not measured here yet; the author: 5.6 s per 1024 on an A100 |
+| **Draft (3 steps, Turbo LoRA)** | 3 / 1.0 + LoRA | the same family's draft tier: 25 % faster, single sharp subjects, primary text correct (the 2-step is a documented failure) | not measured here yet |
+
+The Turbo adapters were trained at 1024x1024 only. Above that the app raises the step
+count at render time, following the author's table (6 steps around 1536 on the long
+side, 8 at 2048; the 3-step gets the same rule, which he did not measure for it), and
+says so in the log; a step count you set higher is never lowered. Above 1024 a long,
+descriptive prompt holds much better than a short one (a layout is already that). They
+are kept unmerged in fp32 as the author asks: the distillation delta is smaller than
+bf16's rounding, merged in bf16 the fine text goes first. On the Hub both files are
+called `lora.safetensors` (the 4-step) and `lora_3step.safetensors`: the 4-step is only
+recognised under its stable names (`moss-turbo-4-steps.safetensors`,
+`moss_image_sft_4step_v2.0.safetensors`), since a `lora.safetensors` with that header
+is also the DMD file.
 
 How the DMD preset gets its LoRA: it looks in the LoRA folders first (under its stable
 name `moss-dmd-8-steps.safetensors`, or under the Hub's generic `lora.safetensors` when
 the file's header is the DMD one), otherwise it fetches it once from
 `lodestones/MOSS-Image-SFT-8-steps-dmd` (1.2 GB, Apache 2.0) into `loras/_hf-edit/`,
 the licence written in the log. Pick another preset and the LoRA leaves slot 1 again;
-your own LoRAs in the other slots are untouched. Should the download fail, the preset
+your own LoRAs in the other slots are untouched (the Turbo presets fetch theirs the
+same way, from `akhaliq/MOSS-Image-SFT-4-steps`). Should the download fail, the preset
 falls back to Draft (12 steps) and says so. The XYZ "Performance" axis and the CLI
 apply the same rule. Note: the DMD author's full recipe also replaces the time
 embedding and samples with its own loop; only the LoRA is used here, and it held on

@@ -886,7 +886,12 @@ class MossPipe:
                 _log("LoRA weights updated in place: "
                      + ", ".join(f"{os.path.basename(p)}@{w:g}" for p, w in wanted))
                 return []
-        reports = cz_moss_lora.apply(tr, wanted)
+        try:
+            import cz_edit_loras
+            fp32 = [p for p, _ in wanted if cz_edit_loras.keep_fp32(p)]
+        except Exception:
+            fp32 = []
+        reports = cz_moss_lora.apply(tr, wanted, fp32=fp32)
         object.__setattr__(self, "_loras", wanted)
         return reports
 
