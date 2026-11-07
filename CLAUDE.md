@@ -1412,6 +1412,17 @@ inutiles ici.
   Turbo LoRA) » sur l'affiche (1152x1632 : le log doit dire 6 steps), puis le 3 steps,
   quelques seeds, textes et sujets à juger contre le DMD 8 steps ; si le Turbo tient,
   retirer le preset DMD (décision de Mike).
+- **Mike ne voyait ni le preset Turbo ni, en fait, le DMD** (07/11/2026) : son
+  `config.txt` avait copié `performance_presets` au lot 1 (« Draft (25 steps) ») et
+  cette clé remplaçait la liste de l'app, comme CLAUDE.md l'annonçait deux fois sans que
+  ça suffise. Corrigé dans l'app plutôt que dans son fichier : `cz_ui._performance_from_config`
+  garde les entrées de la config en tête (elles gagnent sur un nom) et AJOUTE les presets
+  de l'app qu'elle ne nomme pas, avec leur LoRA, dit dans le log au démarrage ;
+  `performance_presets_merge: false` (config-sample, aide) garde la liste de la config
+  seule ; une liste illisible retombe sur celle de l'app, dit. Test :
+  `test_a_config_preset_list_keeps_the_apps_newer_presets` (`test_model_profiles`).
+  Conséquence : les rendus « DMD » que Mike croyait avoir faits n'ont pas eu lieu ;
+  le test du Turbo (et du DMD) reste entièrement à faire.
 
 ## 10. Sources
 

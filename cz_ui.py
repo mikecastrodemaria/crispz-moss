@@ -308,13 +308,45 @@ import json  # noqa: F811 (utilise par _load_styles ci-dessous)
 PERFORMANCE_LORA = {"Draft (8 steps, DMD LoRA)": "moss-dmd-8-steps",
                     "Draft (4 steps, Turbo LoRA)": "moss-turbo-4-steps",
                     "Draft (3 steps, Turbo LoRA)": "moss-turbo-3-steps"}
-if isinstance(CONFIG.get("performance_presets"), dict) and CONFIG["performance_presets"]:
+_BUILT_IN_PERFORMANCE = dict(PERFORMANCE)
+_BUILT_IN_PERFORMANCE_LORA = dict(PERFORMANCE_LORA)
+
+
+def _performance_from_config(cfg):
+    """(PERFORMANCE, PERFORMANCE_LORA, note) from a config's `performance_presets`.
+    The config's entries come first and win on a name; the app's own presets the config
+    does not name are APPENDED (a config.txt copied from an older sample used to hide
+    every preset added since: Mike's kept 'Draft (25 steps)' and never showed the DMD
+    or Turbo ones, 2026-11-07). `performance_presets_merge: false` keeps the config's
+    list alone. note says what was appended, or None."""
+    raw = cfg.get("performance_presets")
+    if not (isinstance(raw, dict) and raw):
+        return dict(_BUILT_IN_PERFORMANCE), dict(_BUILT_IN_PERFORMANCE_LORA), None
     try:
-        PERFORMANCE = {k: (int(v[0]), float(v[1])) for k, v in CONFIG["performance_presets"].items()}
-        PERFORMANCE_LORA = {k: str(v[2]) for k, v in CONFIG["performance_presets"].items()
-                            if isinstance(v, (list, tuple)) and len(v) > 2 and v[2]}
-    except Exception:
-        pass
+        perf = {k: (int(v[0]), float(v[1])) for k, v in raw.items()}
+        lora = {k: str(v[2]) for k, v in raw.items()
+                if isinstance(v, (list, tuple)) and len(v) > 2 and v[2]}
+    except Exception as e:
+        return (dict(_BUILT_IN_PERFORMANCE), dict(_BUILT_IN_PERFORMANCE_LORA),
+                f"performance_presets in config.txt unreadable ({e}): the app's own presets are used")
+    if cfg.get("performance_presets_merge", True) is False:
+        return perf, lora, None
+    added = [k for k in _BUILT_IN_PERFORMANCE if k not in perf]
+    for k in added:
+        perf[k] = _BUILT_IN_PERFORMANCE[k]
+        if k in _BUILT_IN_PERFORMANCE_LORA:
+            lora[k] = _BUILT_IN_PERFORMANCE_LORA[k]
+    note = None
+    if added:
+        note = ("performance_presets in config.txt names " + str(len(raw)) + " preset(s); the app's "
+                + ", ".join(f"'{k}'" for k in added) + " added after them (performance_presets_merge: "
+                "false in config.txt keeps only yours)")
+    return perf, lora, note
+
+
+PERFORMANCE, PERFORMANCE_LORA, _perf_note = _performance_from_config(CONFIG)
+if _perf_note:
+    _log(_perf_note)
 
 # MODEL_PROFILES / profile_for_model -> cz_core.py (imported at the top).
 

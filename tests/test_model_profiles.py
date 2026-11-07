@@ -74,6 +74,30 @@ def test_config_sample_matches_the_code_and_starts_on_moss():
     assert prefs["moss_model"] == REPO and "ideogram_model" not in prefs
 
 
+def test_a_config_preset_list_keeps_the_apps_newer_presets():
+    """A config.txt that copied performance_presets from an older sample used to hide
+    every preset added since (Mike's kept 'Draft (25 steps)' and showed neither the DMD
+    nor the Turbo presets). Now: the config's entries first, the app's missing ones
+    appended with their LoRA, said; performance_presets_merge: false keeps the config's
+    list alone; an unreadable list falls back to the app's, said."""
+    import cz_ui
+    old = {"performance_presets": {"MOSS (50 steps)": [50, 3.0], "Draft (25 steps)": [25, 3.0]}}
+    perf, lora, note = cz_ui._performance_from_config(old)
+    assert list(perf)[:2] == ["MOSS (50 steps)", "Draft (25 steps)"] and perf["Draft (25 steps)"] == (25, 3.0)
+    assert "Draft (4 steps, Turbo LoRA)" in perf and perf["Draft (4 steps, Turbo LoRA)"] == (4, 1.0)
+    assert lora["Draft (4 steps, Turbo LoRA)"] == "moss-turbo-4-steps" and "Draft (25 steps)" not in lora
+    assert "Draft (8 steps, DMD LoRA)" in note and "performance_presets_merge" in note
+    perf, lora, note = cz_ui._performance_from_config(dict(old, performance_presets_merge=False))
+    assert list(perf) == ["MOSS (50 steps)", "Draft (25 steps)"] and lora == {} and note is None
+    perf, lora, note = cz_ui._performance_from_config({"performance_presets": {"X": ["a"]}})
+    assert perf == cz_ui._BUILT_IN_PERFORMANCE and "unreadable" in note
+    perf, lora, note = cz_ui._performance_from_config({})
+    assert perf == cz_ui._BUILT_IN_PERFORMANCE and note is None
+    # a config that renames a built-in keeps its own values (the config wins on a name)
+    perf, _l, _n = cz_ui._performance_from_config({"performance_presets": {"MOSS (50 steps)": [40, 2.5]}})
+    assert perf["MOSS (50 steps)"] == (40, 2.5)
+
+
 def test_the_ui_presets_mirror_the_sample():
     with open(os.path.join(ROOT, "config-sample.txt"), encoding="utf-8") as f:
         cfg = json.load(f)
