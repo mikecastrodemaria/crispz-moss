@@ -1453,6 +1453,14 @@ inutiles ici.
   compris), branché dans `cz_pipeline._split_dirs`, `cz_civitai_batch`, `cz_edit_loras`
   et `cz_protocol` (klein et qwen-edit avaient déjà une version consciente des lecteurs
   dans `cz_pipeline` seulement). Test ajouté à `test_lora_extra_dirs` dans les 7 repos.
+- **Catalogue : deux boutons d'ouverture directe** (07/11/2026, demande de Mike) : dans
+  l'accordéon du catalogue (Advanced, onglet Styles), « Open Asset Browser: Characters » et
+  « Open Asset Browser: Styles » ouvrent l'Asset Browser sur l'onglet voulu par le
+  paramètre `?src=` que la SPA lisait déjà au démarrage (celui des icônes LoRA et
+  checkpoint) ; `cz_ui._ui_catalog_open` = l'ouverture principale + le paramètre. Le
+  message « pas encore de catalogue » de la SPA dit désormais où est l'accordéon (Styles,
+  plus « Asset Browser settings »). Vérifié dans Chromium (onglet actif = la source
+  demandée, aucune erreur de page) ; tests dans `test_catalog` (+1). README étape 2.
 
 ## 10. Sources
 
