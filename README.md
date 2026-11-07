@@ -275,8 +275,10 @@ click.
    **Download / update the catalog (7 MB, huggingface.co)**. The index lands in
    `cache/moss/`, the log writes a `CATALOG:` line, the status under the button says
    what is on disk. A second click only updates it.
-2. **Asset Browser** (its own tab, button "Open Asset Browser"): two new tabs,
-   **Characters** and **Styles**. Folders on the left are the series (one per
+2. **Asset Browser**: two new tabs, **Characters** and **Styles**. The two buttons of
+   the accordion, **Open Asset Browser: Characters** and **Open Asset Browser:
+   Styles**, open it straight on that tab (the general "Open Asset Browser" button
+   of the Save tab opens it on Outputs). Folders on the left are the series (one per
    copyright), the search box matches names, tags and prompts, the cards come 600 at a
    time. A card opens the sheet: name, series, facets, prompt, tags, the full
    "generation prompt" (the whole scene the catalog rendered) and a link to the sample

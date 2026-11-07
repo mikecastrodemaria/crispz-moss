@@ -2177,6 +2177,18 @@ def _ui_gallery_open(output_dir):
     return "Opening Asset Browser in a new tab (indexing in background)...", url
 
 
+def _ui_catalog_open(kind, output_dir):
+    """The two buttons of the catalog accordion (Styles tab): open the Asset Browser
+    straight on its Characters or Styles tab. Same opening as the main button (index.html
+    written now, manifests refreshed in the background), plus the SPA's `?src=` switch,
+    the one the LoRA / checkpoint icons already use. Returns (status, url)."""
+    kind = kind if kind in ("characters", "styles") else "characters"
+    status, url = _ui_gallery_open(output_dir)
+    if not url:
+        return status, url
+    return f"Opening Asset Browser on {kind.capitalize()}...", url + "?src=" + kind
+
+
 def _ui_catalog_status(output_dir):
     import cz_catalog
     return cz_catalog.status(output_dir)
@@ -5163,6 +5175,11 @@ def build_ui():
                                 cat_dl_btn = gr.Button("Download / update the catalog (7 MB, huggingface.co)",
                                                        size="sm")
                             cat_status = gr.Markdown(_ui_catalog_status(DEFAULT_OUTPUT_DIR))
+                            with gr.Row():
+                                cat_open_chars_btn = gr.Button("Open Asset Browser: Characters",
+                                                               size="sm")
+                                cat_open_styles_btn = gr.Button("Open Asset Browser: Styles",
+                                                                size="sm")
                             gr.Markdown("The sample renders can be kept locally too (the Asset "
                                         "Browser then shows them with nothing fetched afterwards): "
                                         "the 280 px thumbnails are 34,249 files, about 270 MB; the "
@@ -5739,6 +5756,12 @@ def build_ui():
         # The 🖼️ icons: open the Asset Browser focused on the selected checkpoint /
         # LoRA.
         _open_js = "(u) => { if (u) window.open(u, '_blank'); }"
+        # The catalog accordion (Styles tab): the Asset Browser opened on its Characters
+        # or Styles tab directly.
+        cat_open_chars_btn.click(lambda o: _ui_catalog_open("characters", o), [output_dir],
+                                 [cat_status, gallery_url]).then(None, [gallery_url], None, js=_open_js)
+        cat_open_styles_btn.click(lambda o: _ui_catalog_open("styles", o), [output_dir],
+                                  [cat_status, gallery_url]).then(None, [gallery_url], None, js=_open_js)
         ckpt_open_btn.click(lambda n: _asset_focus_url("models", n), [ckpt_dd],
                             [ckpt_status, gallery_url]).then(None, [gallery_url], None, js=_open_js)
         for _dd, _ob in zip(lora_dds, lora_open_btns):

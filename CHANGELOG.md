@@ -14,6 +14,10 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
   crispz-studio). One rule now, `cz_core.split_dir_spec`, used by cz_pipeline,
   cz_civitai_batch, cz_edit_loras and cz_protocol: ';' and the POSIX ':' separate, a
   drive colon never does.
+- **Catalog accordion, two openers** (2026-11-07): "Open Asset Browser: Characters" and
+  "Open Asset Browser: Styles" (Advanced, Styles tab) open the Asset Browser straight on
+  that tab, through its `?src=` switch; the Save tab's button still opens it on Outputs.
+
 The specification, decisions and measurements of every lot are in CLAUDE.md.
 
 - **Lot 1, local engine** (2026-11-03): `cz_moss.MossPipe` around the vendored

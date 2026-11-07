@@ -439,7 +439,7 @@ fetch(_srcUrls[src]+'?t='+Date.now()).then(function(r){return r.ok?r.json():null
 if(m){_apply(m);_tryFocus();}
 else{DATA=[];renderFolders();var nt=document.getElementById('note');if(nt)nt.style.display='none';
 grid.innerHTML='<p style="padding:20px;color:#8b98ad">'+((src==='characters'||src==='styles')?
-'No character catalog yet: in crispz-moss, Asset Browser settings, "Character catalog", download it (7 MB from huggingface.co), then reopen the Asset Browser.':
+'No character catalog yet: in crispz-moss, Advanced panel, Styles tab, accordion "Character catalog", download it (7 MB from huggingface.co), then reopen the Asset Browser.':
 'No '+src+' catalog yet (building in background). Reopen the Asset Browser in a few seconds.')+'</p>';cnt.textContent='0 / 0';}});}
 [].slice.call(document.querySelectorAll('.src')).forEach(function(b){b.onclick=function(){loadSource(b.getAttribute('data-s'));};});
 // Refresh: days.json is tiny -> it can be polled for a long time at no cost.

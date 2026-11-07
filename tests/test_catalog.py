@@ -204,6 +204,31 @@ def test_the_ui_offers_the_catalog_accordion():
     assert "Show thumbnails from huggingface.co" in labels
     assert any(isinstance(b, gr.Button) and "Download / update the catalog" in str(b.value)
                for b in demo.blocks.values())
+    # The two direct openers (Mike, 07/11/2026): one per catalog tab of the Asset Browser.
+    buttons = {str(b.value) for b in demo.blocks.values() if isinstance(b, gr.Button)}
+    assert "Open Asset Browser: Characters" in buttons
+    assert "Open Asset Browser: Styles" in buttons
+
+
+def test_the_catalog_buttons_open_the_browser_on_their_tab(tmp_path, monkeypatch):
+    """_ui_catalog_open = the main opener plus the SPA's `?src=` switch, which the page
+    script reads at startup (loadSource on anything but outputs)."""
+    import cz_ui
+    import cz_assets
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(cz_ui, "_allow_runtime_path", lambda p: None)
+    monkeypatch.setattr(cz_ui, "ab_build_catalog", lambda *a, **k: None)
+    status, url = cz_ui._ui_catalog_open("characters", str(out))
+    assert url.startswith("/gradio_api/file=") and url.endswith("?src=characters"), (status, url)
+    assert "Characters" in status
+    status, url = cz_ui._ui_catalog_open("styles", str(out))
+    assert url.endswith("?src=styles") and "Styles" in status
+    # An unknown kind falls back to the characters tab rather than an empty browser.
+    assert cz_ui._ui_catalog_open("nope", str(out))[1].endswith("?src=characters")
+    # The SPA honours the switch: it reads `src` from the URL and loads that source.
+    js = cz_assets.ASSET_BROWSER_HTML
+    assert "searchParams.get('src')" in js and "loadSource(s)" in js
 
 
 def test_renders_on_disk_come_first(cached, monkeypatch):
