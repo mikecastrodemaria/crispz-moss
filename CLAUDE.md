@@ -1436,6 +1436,17 @@ inutiles ici.
   `mod._buffers[name]` à chaque appel ; `rescale` inchangé (il ne touche que l'échelle).
   Test `test_the_hook_follows_the_module_when_it_moves` (déplacement de dtype comme
   substitut CPU du déplacement de device : sortie qui suit, rescale, unload).
+- **Correctif des presets porté à toute la famille** (07/11/2026, demande de Mike, sur
+  `main` direct) : crispz-ideogram (`da5104b`), crispz-flux3 (`e4c78fc`), crispz-klein
+  (`0761349`), crispz-qwen-edit (`0f2ae77`), crispz-krea2 (`72c6125`), crispz-studio
+  (`e9e309d`). Même fonction, même clé `performance_presets_merge`, un test par repo.
+  Trois listes intégrées étaient périmées et masquées par le sample (ideogram : FLUX.3 ;
+  klein, qwen-edit, krea2 : « Turbo 8 / Quality 20 / Base CFG 28 ») : alignées sur le
+  sample avec un test d'égalité. Suites vertes sur ideogram (68), flux3 (59), klein (58),
+  qwen-edit (51) ; krea2 (49/50) et studio (37/38) ont un échec PRÉEXISTANT et propre à
+  Linux, `test_lora_extra_dirs` : `_split_dirs` coupe sur `os.pathsep` (« : » sous
+  Linux), donc « X:/a » se brise ; le test attend la sémantique Windows ; leur CI tourne
+  sur ubuntu, elle était donc déjà rouge. Non corrigé ici (hors sujet), à signaler.
 
 ## 10. Sources
 
