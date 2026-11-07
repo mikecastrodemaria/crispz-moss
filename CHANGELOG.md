@@ -7,6 +7,13 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## 1.0.0 (2026-11-05, crispz-moss) : crispz-ideogram ported to MOSS-Image
 
+- **Extra folder lists on Linux** (2026-11-07, whole family): `loras_extra_dirs` and the
+  other 'a;b' folder lists were split on os.pathsep blindly, so on Linux (the CI) a
+  Windows path in a shared preferences.json broke on its drive colon ('X:/a;Y:/b' into
+  'X', '/a', 'Y', '/b'; `test_lora_extra_dirs` was red on the CI of crispz-krea2 and
+  crispz-studio). One rule now, `cz_core.split_dir_spec`, used by cz_pipeline,
+  cz_civitai_batch, cz_edit_loras and cz_protocol: ';' and the POSIX ':' separate, a
+  drive colon never does.
 The specification, decisions and measurements of every lot are in CLAUDE.md.
 
 - **Lot 1, local engine** (2026-11-03): `cz_moss.MossPipe` around the vendored

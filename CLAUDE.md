@@ -1447,6 +1447,12 @@ inutiles ici.
   Linux, `test_lora_extra_dirs` : `_split_dirs` coupe sur `os.pathsep` (« : » sous
   Linux), donc « X:/a » se brise ; le test attend la sémantique Windows ; leur CI tourne
   sur ubuntu, elle était donc déjà rouge. Non corrigé ici (hors sujet), à signaler.
+- **Découpage des listes de dossiers, corrigé dans toute la famille** (07/11/2026,
+  demande de Mike) : `cz_core.split_dir_spec` (une seule règle : « ; » et le « : » POSIX
+  séparent, un deux-points de lecteur Windows jamais, sur tout système ; « X:/a:Y:/b »
+  compris), branché dans `cz_pipeline._split_dirs`, `cz_civitai_batch`, `cz_edit_loras`
+  et `cz_protocol` (klein et qwen-edit avaient déjà une version consciente des lecteurs
+  dans `cz_pipeline` seulement). Test ajouté à `test_lora_extra_dirs` dans les 7 repos.
 
 ## 10. Sources
 
