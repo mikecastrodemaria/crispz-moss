@@ -196,6 +196,40 @@ def test_the_pipe_applies_them_and_the_render_changes(tmp_path):
         pipe.load_lora_weights(p)
 
 
+def _lr(mod):
+    """The (down, up) buffers of a module's first LoRA, read the way the hook does."""
+    dn, un, _s = mod._cz_lr[0]
+    return mod._buffers[dn], mod._buffers[un]
+
+
+def test_the_hook_follows_the_module_when_it_moves(tmp_path):
+    """module.to() replaces the buffers: the hook must read them by name, not keep the
+    tensors captured at apply time (a LoRA applied before the DiT reached the card ran
+    on CPU tensors on the 5090, 2026-11-07). Checked with a dtype move (the CPU-only
+    stand-in for a device move): the output follows the converted buffers, no stale
+    tensor is kept, and the rescale still applies."""
+    down, up = _rand(4, DIM, seed=1), _rand(DIM, 4, seed=2)
+    p = _save(tmp_path, "k.safetensors", {
+        "diffusion_model.layers.0.proj.q.lora_down.weight": down,
+        "diffusion_model.layers.0.proj.q.lora_up.weight": up,
+        "diffusion_model.layers.0.proj.q.alpha": torch.tensor(4.0)})
+    tr = tiny_transformer()
+    L.apply(tr, [(p, 1.0)])
+    mod = tr.layers[0].proj["q"]
+    names = mod._cz_lr[0][:2]
+    assert all(isinstance(n, str) and n in mod._buffers for n in names)
+    tr.to(torch.float64)                               # the stand-in for .to("cuda")
+    d, u = _lr(mod)
+    assert d.dtype == torch.float64 and u.dtype == torch.float64
+    x = _rand(1, 5, DIM, seed=3).to(torch.float64)
+    base = torch.nn.functional.linear(x, mod.weight, mod.bias)
+    want = base + (x @ down.to(torch.float64).t() @ up.to(torch.float64).t()) * 1.0
+    assert torch.allclose(mod(x), want, atol=1e-6)
+    assert L.rescale(tr, [0.5]) and torch.allclose(mod(x), base + (want - base) * 0.5, atol=1e-6)
+    tr.to(torch.float32)
+    assert _lr(mod)[0].dtype == torch.float32 and L.unload(tr) == 1
+
+
 def test_fp32_files_keep_their_dtype_and_the_pipe_asks_the_catalogue(tmp_path):
     """apply(fp32=[path]) keeps an fp32 file's tensors in fp32 next to a bf16 DiT (the
     hook runs that matmul in fp32 and casts the result); a file named after a Turbo
@@ -209,10 +243,10 @@ def test_fp32_files_keep_their_dtype_and_the_pipe_asks_the_catalogue(tmp_path):
     plain = _save(tmp_path, "plain.safetensors", sd)
     turbo = _save(tmp_path, "moss-turbo-4-steps.safetensors", sd)
     L.apply(tr, [(plain, 1.0)])
-    d, u, _s = tr.layers[0].proj["q"]._cz_lr[0]
+    d, u = _lr(tr.layers[0].proj["q"])
     assert d.dtype == torch.bfloat16 and u.dtype == torch.bfloat16
     L.apply(tr, [(plain, 1.0)], fp32=[plain])
-    d, u, _s = tr.layers[0].proj["q"]._cz_lr[0]
+    d, u = _lr(tr.layers[0].proj["q"])
     assert d.dtype == torch.float32 and u.dtype == torch.float32
     x = _rand(1, 5, DIM, seed=3).to(torch.bfloat16)
     out = tr.layers[0].proj["q"](x)
@@ -223,11 +257,9 @@ def test_fp32_files_keep_their_dtype_and_the_pipe_asks_the_catalogue(tmp_path):
     pipe = tiny_pipe()
     pipe.transformer.to(torch.bfloat16)
     pipe.set_loras([(turbo, 1.0)])
-    d, u, _s = pipe.transformer.layers[0].proj["q"]._cz_lr[0]
-    assert d.dtype == torch.float32
+    assert _lr(pipe.transformer.layers[0].proj["q"])[0].dtype == torch.float32
     pipe.set_loras([(plain, 1.0)])
-    d, u, _s = pipe.transformer.layers[0].proj["q"]._cz_lr[0]
-    assert d.dtype == torch.bfloat16
+    assert _lr(pipe.transformer.layers[0].proj["q"])[0].dtype == torch.bfloat16
     pipe.set_loras([])
 
 

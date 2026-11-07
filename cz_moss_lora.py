@@ -239,13 +239,21 @@ def read_file(path):
 
 # --- Application ----------------------------------------------------------------------
 def _hook(mod, args, out):
+    # The LoRA tensors are read from the module's buffers BY NAME at every call: a
+    # module.to(device) (the DiT parked in RAM while the text encoder works, then back
+    # on the card) replaces the buffers with copies, and a tensor captured at apply time
+    # would stay where it was (seen on the 5090, 2026-11-07: a LoRA applied before the
+    # DiT reached the card left its tensors on the CPU, "Expected all tensors to be on
+    # the same device"; and a captured copy kept a stale duplicate alive).
     x = args[0]
-    for d, u, s in getattr(mod, "_cz_lr", ()):
+    for dn, un, s in getattr(mod, "_cz_lr", ()):
+        d, u = mod._buffers[dn], mod._buffers[un]
         out = out + ((x.to(d.dtype) @ d.t()) @ u.t()).to(out.dtype) * s
-    for d, s in getattr(mod, "_cz_df", ()):
+    for dn, s in getattr(mod, "_cz_df", ()):
+        d = mod._buffers[dn]
         out = out + (x.to(d.dtype) @ d.t()).to(out.dtype) * s
-    for b, s in getattr(mod, "_cz_db", ()):
-        out = out + b.to(out.dtype) * s
+    for bn, s in getattr(mod, "_cz_db", ()):
+        out = out + mod._buffers[bn].to(out.dtype) * s
     return out
 
 
@@ -291,7 +299,7 @@ def _buf(mod, name, t, keep_dtype=False):
     else:
         dt = ref.dtype if ref is not None and ref.is_floating_point() else torch.float32
     mod.register_buffer(name, t.detach().to(dev, dt), persistent=False)
-    return getattr(mod, name)
+    return name
 
 
 def apply(transformer, loras, fp32=()):
@@ -320,16 +328,16 @@ def apply(transformer, loras, fp32=()):
                 r = it["down"].shape[0]
                 base = (float(it["alpha"]) / r) if it.get("alpha") else 1.0
                 idx = len(getattr(mod, "_cz_lr", ()))
-                d = _buf(mod, f"_cz_lora_{li}_{idx}_down", it["down"], keep)
-                u = _buf(mod, f"_cz_lora_{li}_{idx}_up", it["up"], keep)
-                mod._cz_lr = list(getattr(mod, "_cz_lr", ())) + [(d, u, base * float(weight))]
+                dn = _buf(mod, f"_cz_lora_{li}_{idx}_down", it["down"], keep)
+                un = _buf(mod, f"_cz_lora_{li}_{idx}_up", it["up"], keep)
+                mod._cz_lr = list(getattr(mod, "_cz_lr", ())) + [(dn, un, base * float(weight))]
                 mod._cz_scales = list(getattr(mod, "_cz_scales", ())) + [("lr", idx, li, base)]
                 touched = True
             if "diff" in it:
                 if is_linear:
                     idx = len(getattr(mod, "_cz_df", ()))
-                    d = _buf(mod, f"_cz_lora_{li}_{idx}_diff", it["diff"], keep)
-                    mod._cz_df = list(getattr(mod, "_cz_df", ())) + [(d, float(weight))]
+                    dn = _buf(mod, f"_cz_lora_{li}_{idx}_diff", it["diff"], keep)
+                    mod._cz_df = list(getattr(mod, "_cz_df", ())) + [(dn, float(weight))]
                     mod._cz_scales = list(getattr(mod, "_cz_scales", ())) + [("df", idx, li, 1.0)]
                     rep["diffs"] += 1
                     touched = True
@@ -342,8 +350,8 @@ def apply(transformer, loras, fp32=()):
                     touched = True
             if "diff_b" in it and is_linear:        # an output offset, bias or not
                 idx = len(getattr(mod, "_cz_db", ()))
-                b = _buf(mod, f"_cz_lora_{li}_{idx}_diffb", it["diff_b"], keep)
-                mod._cz_db = list(getattr(mod, "_cz_db", ())) + [(b, float(weight))]
+                bn = _buf(mod, f"_cz_lora_{li}_{idx}_diffb", it["diff_b"], keep)
+                mod._cz_db = list(getattr(mod, "_cz_db", ())) + [(bn, float(weight))]
                 mod._cz_scales = list(getattr(mod, "_cz_scales", ())) + [("db", idx, li, 1.0)]
                 touched = True
             if touched:

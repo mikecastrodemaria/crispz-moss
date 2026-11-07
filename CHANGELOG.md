@@ -125,6 +125,12 @@ The specification, decisions and measurements of every lot are in CLAUDE.md.
   that from the author's table (6 around 1536, 8 at 2048), said once per size, never
   lowered. The hub's generic `lora.safetensors` is not taken for the Turbo (same header
   as the DMD): stable and versioned names only. Not measured on the 5090 yet.
+- **Fix, LoRA hook and the DiT swap** (2026-11-07): the LoRA hook captured its tensors
+  at apply time; `module.to()` (the DiT parked in RAM while the text encoder works, then
+  brought back) replaces the buffers, so a LoRA applied before the DiT reached the card
+  ran on CPU tensors ("Expected all tensors to be on the same device", first Turbo
+  render on the 5090), and one applied on the card kept a stale duplicate alive. The
+  hook now reads the buffers by name at every call; test with a dtype move.
 - **Edit (references): "Output size from Settings"** (2026-11-05, asked by Mike, as in
   crispz-klein): a checkbox of the Edit tab; off (default) the result takes Ref 1's size
   and ratio, on it takes the Settings width / height and aspect ratio (Ref 1 read at its

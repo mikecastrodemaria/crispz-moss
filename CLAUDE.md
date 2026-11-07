@@ -1423,6 +1423,19 @@ inutiles ici.
   `test_a_config_preset_list_keeps_the_apps_newer_presets` (`test_model_profiles`).
   Conséquence : les rendus « DMD » que Mike croyait avoir faits n'ont pas eu lieu ;
   le test du Turbo (et du DMD) reste entièrement à faire.
+- **Premier rendu Turbo chez Mike (07/11/2026) : erreur de device, corrigée.** Log :
+  LoRA appliquée (252 modules, fp32) AVANT la ligne du swap, puis au premier forward
+  `Expected all tensors to be on the same device, but got mat2 is on cpu`. Cause : le
+  hook de `cz_moss_lora` gardait les TENSEURS capturés à l'application ; `module.to()`
+  (le DiT garé en RAM pendant l'encodage puis remonté, ou simplement monté sur la carte
+  après le chargement) remplace les buffers par des copies, les tuples du hook
+  pointaient encore sur les anciens. Preset choisi avant le premier chargement : la LoRA
+  est appliquée quand le DiT est encore en RAM, ses tenseurs y restent. Au lot 4 le
+  script appliquait la LoRA après le chargement : ça marchait, en gardant une copie
+  morte en VRAM. Correctif : les tuples portent les NOMS des buffers, le hook lit
+  `mod._buffers[name]` à chaque appel ; `rescale` inchangé (il ne touche que l'échelle).
+  Test `test_the_hook_follows_the_module_when_it_moves` (déplacement de dtype comme
+  substitut CPU du déplacement de device : sortie qui suit, rescale, unload).
 
 ## 10. Sources
 
