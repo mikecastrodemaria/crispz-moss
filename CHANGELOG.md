@@ -17,6 +17,10 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 - **Catalog accordion, two openers** (2026-11-07): "Open Asset Browser: Characters" and
   "Open Asset Browser: Styles" (Advanced, Styles tab) open the Asset Browser straight on
   that tab, through its `?src=` switch; the Save tab's button still opens it on Outputs.
+- **Boot advice** (2026-11-07): `_hw_check.py` (run.bat, boot_check.bat, update.bat) still
+  advised "FLUX.3 Image Klein bf16 fits whole"; its tiers now follow the MOSS-Image
+  measurements (27.2 GB of weights, encoder-only 'model' offload under 40 GB, nf4 encoder
+  from 20 GB, sequential below).
 
 The specification, decisions and measurements of every lot are in CLAUDE.md.
 

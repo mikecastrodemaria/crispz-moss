@@ -36,27 +36,34 @@ def arch_name(major, minor):
 def offload_reco(vram_gb):
     """The offload mode advised according to the VRAM.
 
-    Landmarks measured on this project (RTX 5090, 2026-10-28): FLUX.3 Image Klein in bf16
-    is 18.8 GB resident for the whole surface and peaks at 23.7 GB on the first image;
-    BFL's fp8r build is 14.4 GB, nvfp4 13.5 GB (their figures).
-    'sequential' moves every submodule on every forward: very slow
-    (measured ~3 s/step against ~1.1 s/step in 'model'), to be kept for the small cards.
+    Landmarks measured on this project (RTX 5090, 2026-11-03 to 05, see CLAUDE.md):
+    MOSS-Image weighs 27.2 GB in bf16 (DiT 10.2 + Qwen3.5-9B encoder 16.8 + VAE 0.25).
+    'model' here is crispz-moss's encoder-only offload: the DiT and the VAE stay on the
+    card (9.7 GB resident), the encoder visits it for a new prompt only, the DiT being
+    parked in RAM meanwhile: 15 to 16 GB peak on a cached prompt, 19 to 23.5 GB on a
+    new one (the encoder plus its temporaries, which grow with the prompt length).
+    The nf4 encoder stays resident (15.5 GB) and caps the peak at 21 GB at 1 Mpx.
+    'auto' picks this encoder-only 'model' under 40 GB. 'sequential' moves every
+    submodule on every forward: slow, for the small cards only.
     """
-    if vram_gb >= 23:
-        return ("none", "FLUX.3 Image Klein bf16 fits whole (18.8 GB resident, 23.7 GB "
-                        "peak measured on an RTX 5090).")
+    if vram_gb >= 40:
+        return ("none", "MOSS-Image bf16 fits whole (27.2 GB of weights plus the "
+                        "activations); 'auto' picks it above 40 GB.")
+    if vram_gb >= 24:
+        return ("auto", "encoder-only 'model' offload (what 'auto' picks under 40 GB): "
+                        "9.7 GB resident, 19 to 23.5 GB peak on a new prompt, measured on "
+                        "an RTX 5090.")
     if vram_gb >= 20:
-        return ("auto", "bf16 is on the edge (18.8 GB + the activations): 'auto' measures "
-                        "the free VRAM at load time; or pick fp8r (14.4 GB) in Precision.")
-    # The threshold at 11 and not 12: a card sold as "12 GB" exposes ~11.6-11.9 GB.
-    # Putting those in 'sequential' would cost ~3x the time per step (measured) for nothing.
-    if vram_gb >= 11:
-        return ("model", "pick fp8r (14.4 GB) or nvfp4 (13.5 GB, RTX 50xx) in Precision, "
-                         "or a GGUF build, to keep some headroom.")
-    if vram_gb >= 7:
-        return ("sequential", "tight card: GGUF Q4 advised, 1024px max, "
-                              "and expect slow steps.")
-    return ("sequential", "very limited VRAM: GGUF Q4, 768-1024px, ESRGAN alone if needed.")
+        return ("model", "on the edge for the bf16 encoder (up to 23.5 GB on a long "
+                         "prompt): pick the nf4 encoder in Precision (21 GB peak at 1 Mpx, "
+                         "constant).")
+    # The DiT alone is 10.2 GB in bf16: under 20 GB the encoder-only offload has no room
+    # for the encoder's visit, and under 12 GB not even for the DiT and the activations.
+    if vram_gb >= 12:
+        return ("sequential", "nf4 encoder advised, 1024px max; expect slow steps "
+                              "(not measured on this project).")
+    return ("sequential", "very limited VRAM: nf4 encoder, 768-1024px, ESRGAN alone if "
+                          "needed (not measured on this project).")
 
 
 def main():

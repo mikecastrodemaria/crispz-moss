@@ -1461,6 +1461,21 @@ inutiles ici.
   message « pas encore de catalogue » de la SPA dit désormais où est l'accordéon (Styles,
   plus « Asset Browser settings »). Vérifié dans Chromium (onglet actif = la source
   demandée, aucune erreur de page) ; tests dans `test_catalog` (+1). README étape 2.
+- **Tracebacks au démarrage chez Mike après ce pull (07/11/2026) : onglet périmé, pas un
+  bug.** Trois erreurs Gradio dès le lancement (`_ui_xyz_fill` reçoit
+  `["http://127.0.0.1:11434"]`, `_pick_download` un `SelectData` vide, `_ui_compose` zéro
+  entrée). Vérifié en comparant les tables de gestionnaires des deux versions : les trois
+  gestionnaires de chargement de page de l'ANCIENNE version (détection Ollama, modèles
+  Improve, rechargement de la queue) portaient les indices 212 à 214, que les deux
+  nouveaux boutons ont décalés vers exactement ces trois fonctions. Un onglet du
+  navigateur ouvert avant le pull s'est reconnecté au nouveau serveur : F5 suffit. À
+  retenir à chaque pull qui ajoute des gestionnaires.
+- **Conseil matériel du boot** (`_hw_check.py`, lancé par run / boot_check / update) : il
+  disait encore « FLUX.3 Image Klein bf16 fits whole (18.8 GB resident, 23.7 GB peak) ».
+  Paliers réécrits sur les mesures MOSS : 40 Go et plus 'none' (27,2 Go de poids), 24 à
+  40 'auto' (= 'model' encodeur seul, 9,7 Go au repos, 19 à 23,5 Go en pic sur un prompt
+  neuf), 20 à 24 'model' avec l'encodeur nf4 conseillé (21 Go constants), en dessous
+  'sequential' avec nf4 (non mesuré).
 
 ## 10. Sources
 
