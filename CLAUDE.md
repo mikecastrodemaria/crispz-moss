@@ -1488,6 +1488,17 @@ inutiles ici.
   dans le log ; même garde sur le bouton « Apply CivitAI recommended settings ». Une
   fiche déjà écrite avec steps 0 est donc inoffensive sans la retélécharger. Test :
   `tests/test_civitai_reco_bounds.py`. Porté à la famille (même tronc), voir plus bas.
+- **Porté aux six autres crispz** (07/11/2026, sur `main`) : ideogram `cfe8823`, flux3
+  `ff63123`, klein `d63e78e`, qwen-edit `4f1dfc7`, krea2 `47a8d2e`, studio `44b8aba`.
+  Bornes par repo (2 à 80 / 0 à 10 sur ideogram, 2 à 40 / 0 à 8 sur flux3, klein,
+  qwen-edit et krea2, la table `_UI_BOUNDS` existante sur studio) ; krea2 garde sa
+  conversion CFG standard vers guidance Krea, appliquée à la valeur bornée. Même test dans
+  chaque repo. **Trouvé au passage** : klein, qwen-edit, krea2 et studio ignoraient tout
+  `tests/` dans `.gitignore` (le piège déjà noté dans crispz-flux3) : le
+  `tests/test_performance_presets.py` écrit le 07/11 pour qwen-edit, krea2 et studio
+  n'avait JAMAIS été commité, leur commit des presets est donc parti sans son test.
+  Règle corrigée (`tests/*` + `!tests/*.py`), les deux fichiers de test ajoutés dans ce
+  commit.
 
 ## 10. Sources
 
