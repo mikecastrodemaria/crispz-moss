@@ -21,6 +21,13 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
   advised "FLUX.3 Image Klein bf16 fits whole"; its tiers now follow the MOSS-Image
   measurements (27.2 GB of weights, encoder-only 'model' offload under 40 GB, nf4 encoder
   from 20 GB, sequential below).
+- **CivitAI consensus at 0 steps** (2026-11-07): CivitAI publishes `steps: 0` /
+  `cfgScale: 0` for images without the value; the median kept them and a sidecar could
+  carry steps 0, which selecting the checkpoint pushed into the steps slider (minimum 2):
+  Gradio then refused every click ("Value 0 is less than minimum value 2"). The median
+  ignores zeros, and the UI keeps a sidecar's steps / CFG inside the sliders' bounds
+  (`_sane_reco`: zero = ignored, above the maximum = clamped, said in the log), both when
+  a checkpoint is selected and on "Apply CivitAI recommended settings".
 
 The specification, decisions and measurements of every lot are in CLAUDE.md.
 

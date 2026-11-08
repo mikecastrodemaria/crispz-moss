@@ -1476,6 +1476,18 @@ inutiles ici.
   40 'auto' (= 'model' encodeur seul, 9,7 Go au repos, 19 à 23,5 Go en pic sur un prompt
   neuf), 20 à 24 'model' avec l'encodeur nf4 conseillé (21 Go constants), en dessous
   'sequential' avec nf4 (non mesuré).
+- **« Value 0 is less than minimum value 2 » après la sélection d'un checkpoint**
+  (07/11/2026, `jibMixMossRealistic_v2RealityRenew`, diagnostic apporté par Mike depuis une
+  autre session, vérifié dans le code) : `cz_civitai.analyze_settings` gardait les zéros
+  dans la médiane (CivitAI publie `steps: 0` pour une image sans la valeur), et
+  `_profile_for_checkpoint` appliquait les steps de la fiche sans borne ; le curseur
+  (minimum 2) recevait 0 et Gradio refusait le clic suivant. Correctif : zéros ignorés
+  dans la médiane ; `cz_ui._sane_reco` borne steps et CFG de la fiche aux curseurs
+  (`GEN_STEPS_BOUNDS`, `GUIDANCE_BOUNDS`, désormais la source des deux curseurs) : zéro ou
+  négatif = ignoré (le profil du modèle s'applique), au-dessus du maximum = ramené, dit
+  dans le log ; même garde sur le bouton « Apply CivitAI recommended settings ». Une
+  fiche déjà écrite avec steps 0 est donc inoffensive sans la retélécharger. Test :
+  `tests/test_civitai_reco_bounds.py`. Porté à la famille (même tronc), voir plus bas.
 
 ## 10. Sources
 
