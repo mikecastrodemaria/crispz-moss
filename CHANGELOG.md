@@ -7,6 +7,14 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## 1.0.0 (2026-11-05, crispz-moss) : crispz-ideogram ported to MOSS-Image
 
+- **Protocol: `guidance` per call on every op** (2026-11-09, for crispz-motion): the
+  protocol applied `spec.guidance` to `edit` only and warned "not applied" on `gen`,
+  `upscale` and `inpaint`. It is now the CFG of that call on all four (0 to 20, a
+  wrong value is code 2), the app's slider is restored after the call, even when the
+  render fails, and the log says it once per call (`protocol: cfg 1 for this call`).
+  `caps` announces `supports.guidance`, the result echoes `guidance`. A distilled
+  preset (Turbo 4 steps, DMD 8 steps: CFG 1) is now usable from a caller while the
+  app stays at CFG 3. Tests in `test_protocol`.
 - **Extra folder lists on Linux** (2026-11-07, whole family): `loras_extra_dirs` and the
   other 'a;b' folder lists were split on os.pathsep blindly, so on Linux (the CI) a
   Windows path in a shared preferences.json broke on its drive colon ('X:/a;Y:/b' into

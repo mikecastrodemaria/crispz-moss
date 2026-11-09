@@ -65,12 +65,23 @@ def test_validate_spec_unknown_field_warns_never_fails():
     assert any("qwen_only_knob" in w for w in warnings)
 
 
-def test_validate_spec_guidance_count_warn():
-    _spec, warnings = cp.validate_spec(
+def test_validate_spec_guidance_kept_count_warn():
+    # guidance is a per-call CFG on every op since 2026-11-09: kept, no warning
+    spec, warnings = cp.validate_spec(
         {"protocol": 1, "prompt": "x", "guidance": 3.5, "count": 4})
     text = " ".join(warnings)
-    assert "guidance" in text
+    assert spec["guidance"] == 3.5
+    assert "guidance" not in text
     assert "count forced to 1" in text
+    _spec, warnings = cp.validate_spec({"protocol": 1, "prompt": "x"})
+    assert "guidance" not in _spec
+    for bad in ("high", -1, 21):
+        try:
+            cp.validate_spec({"protocol": 1, "prompt": "x", "guidance": bad})
+        except cp.SpecError as e:
+            assert e.code == 2
+        else:
+            raise AssertionError(f"guidance {bad!r} should raise")
 
 
 def test_validate_spec_bad_values_are_code_2():
@@ -162,11 +173,12 @@ def test_validate_refs_capped_at_max():
 class _FakePipeline(types.ModuleType):
     LORA_WEIGHT = 1.0
     _LAST_SEED = 424242
+    GUIDANCE = 3.0          # the instance's slider (MOSS default)
 
     def __init__(self):
         super().__init__("cz_pipeline")
         self.calls = {"loras": None, "model": None, "gen": None,
-                      "omni": None, "omni_kw": None}
+                      "omni": None, "omni_kw": None, "cfg_seen": None}
 
     def set_loras(self, slots):
         self.calls["loras"] = slots
@@ -176,7 +188,17 @@ class _FakePipeline(types.ModuleType):
 
     def txt2img_run(self, prompt, w, h, steps, seed, negative=""):
         self.calls["gen"] = (prompt, w, h, steps, seed, negative)
+        self.calls["cfg_seen"] = self.GUIDANCE
         return Image.new("RGB", (w, h), "#204060"), {"txt2img": 1.5}
+
+    def process_one(self, image, model, factor, denoise, steps, prompt, seed,
+                    tile, overlap, do_esrgan=True):
+        self.calls["cfg_seen"] = self.GUIDANCE
+        return image.copy(), {"refine": 0.5}
+
+    def inpaint_run(self, bg, mask, prompt, steps, denoise, seed):
+        self.calls["cfg_seen"] = self.GUIDANCE
+        return bg.copy()
 
     def generate_omni(self, refs, prompt, negative, w, h, steps, seed, **kw):
         # **kw: the optional kwargs some forks pass to the omni call
@@ -243,6 +265,65 @@ def test_run_gen_explicit_seed_is_passed_and_reported():
         assert fake.calls["gen"][4] == 42
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_spec_guidance_is_the_cfg_of_that_call_only_on_every_op():
+    # crispz-motion drives the Turbo LoRA (CFG 1) through the protocol while
+    # the instance slider stays at 3.0: gen, upscale (img2img at factor 1) and
+    # inpaint render at the spec's CFG, the slider comes back after each call,
+    # and a spec without guidance keeps the slider.
+    d = tempfile.mkdtemp(prefix="cz_proto_g_")
+    old_esrgan = sys.modules.get("cz_esrgan")
+    sys.modules["cz_esrgan"] = types.SimpleNamespace(
+        list_esrgan_models=lambda: [], ESRGAN_DIR=d)
+    try:
+        src = os.path.join(d, "src.png")
+        mask = os.path.join(d, "mask.png")
+        Image.new("RGB", (64, 64), "#336699").save(src)
+        Image.new("L", (64, 64), 255).save(mask)
+        base = {"protocol": 1, "prompt": "x", "width": 64, "height": 64,
+                "seed": 7, "out_dir": d}
+        cases = (("gen", cp.run_gen, {}),
+                 ("upscale", cp.run_upscale, {"input": src, "factor": 1.0,
+                                              "denoise": 0.35}),
+                 ("inpaint", cp.run_inpaint, {"input": src, "mask": mask}))
+        with _fake_pipeline() as fake:
+            for op, run, extra in cases:
+                spec, w = cp.validate_spec(dict(base, op=op, guidance=1.0,
+                                                **extra), op=op)
+                res = run(spec, w)
+                assert res["ok"], (op, res)
+                assert fake.calls["cfg_seen"] == 1.0, op
+                assert res["guidance"] == 1.0, op
+                assert fake.GUIDANCE == 3.0, f"{op}: slider not restored"
+                assert not any("guidance" in x for x in res["warnings"]), op
+                spec, w = cp.validate_spec(dict(base, op=op, **extra), op=op)
+                res = run(spec, w)
+                assert fake.calls["cfg_seen"] == 3.0, op
+                assert "guidance" not in res, op
+        assert cp.caps_dict()["supports"]["guidance"] is True
+    finally:
+        if old_esrgan is not None:
+            sys.modules["cz_esrgan"] = old_esrgan
+        else:
+            sys.modules.pop("cz_esrgan", None)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_spec_guidance_is_restored_when_the_render_fails():
+    with _fake_pipeline() as fake:
+        def boom(*a, **k):
+            raise RuntimeError("out of memory")
+        fake.txt2img_run = boom
+        spec, w = cp.validate_spec({"protocol": 1, "prompt": "x",
+                                    "guidance": 1.0, "out_dir": tempfile.gettempdir()})
+        try:
+            cp.run_gen(spec, w)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("the render error must propagate")
+        assert fake.GUIDANCE == 3.0
 
 
 def test_run_gen_with_refs_takes_the_omni_route():

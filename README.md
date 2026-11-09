@@ -308,7 +308,11 @@ styles and prompt ideas, not for a client deliverable.
 
 `python app.py --help`, the cheat sheet in [README_CLI.md](README_CLI.md), and the
 family protocol: `czp caps` / `czp gen --spec spec.json` (routes to the running app,
-else runs locally). `caps` says what is emulated (`supports.emulated`).
+else runs locally). `caps` says what is emulated (`supports.emulated`). A spec may
+carry `guidance` on every op (`gen`, `upscale`, `inpaint`, `edit`): it is the CFG of
+that call only, the app's slider is restored after it and the log says so
+(`supports.guidance`). This is how a caller such as crispz-motion renders with the
+Turbo LoRA (CFG 1) while the app stays at CFG 3.
 
 ## Tests
 

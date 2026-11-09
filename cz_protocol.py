@@ -17,8 +17,9 @@ Output: always ONE JSON line on stdout. Exit codes:
     0 ok - 1 run error - 2 invalid spec - 3 unsupported op/protocol -
     4 no route (no instance and no local execution possible).
 
-v1: one image per call (the caller loops); guidance is accepted but not
-applied (warning, never silent); on the remote route spec.model is ignored
+v1: one image per call (the caller loops); spec.guidance, when present, is
+the CFG of THAT call on every op (the instance's slider is restored after it,
+said in the log); on the remote route spec.model is ignored
 with a warning (we never swap the model of the user's running instance under
 their feet).
 
@@ -41,6 +42,7 @@ import sys
 import json
 import time
 import argparse
+import contextlib
 import re
 import urllib.request
 
@@ -241,6 +243,8 @@ def caps_dict():
                          "edit_presets": bool(_edit_lora_catalog()),
                          "inpaint": FAMILY_CAPS["inpaint"],
                          "img2img": FAMILY_CAPS["img2img"],
+                         # spec.guidance = the CFG of that call, every op
+                         "guidance": True,
                          "emulated": list(EMULATED_CAPS),
                          "cloud": _cloud_caps()},
             "model_loaded": _model_loaded(),
@@ -479,15 +483,16 @@ def validate_spec(spec, op="gen"):
             raise SpecError("invalid 'steps'")
     out["steps"] = steps
     if spec.get("guidance") is not None:
-        if op == "edit":
-            # Applied on the edit (per-call override): a distilled preset
-            # (Lightning / Rapid) wants 1.0 while the global slider stays at 4.
-            try:
-                out["guidance"] = float(spec["guidance"])
-            except (TypeError, ValueError):
-                raise SpecError("invalid 'guidance'")
-        else:
-            warnings.append("'guidance' not applied (v1: instance settings win)")
+        # Applied on EVERY op as a per-call override (edit since lot 4b; gen,
+        # upscale and inpaint since 2026-11-09, for crispz-motion): a distilled
+        # preset (Turbo 4 steps, DMD 8 steps) wants CFG 1.0 while the instance's
+        # slider stays at 3.0. The instance's own value is restored after the call.
+        try:
+            out["guidance"] = float(spec["guidance"])
+        except (TypeError, ValueError):
+            raise SpecError("invalid 'guidance'")
+        if not 0.0 <= out["guidance"] <= 20.0:
+            raise SpecError(f"'guidance' out of range (0-20): {out['guidance']}")
     # (crispz-klein warned here that guidance had no effect: true of a distilled model,
     # false of MOSS-Image, a real CFG. Removed.)
     refs = [str(r) for r in (spec.get("refs") or []) if str(r).strip()]
@@ -535,7 +540,47 @@ def validate_spec(spec, op="gen"):
 # ----------------------------------------------------------------------------
 # Local execution (heavy imports HERE only)
 # ----------------------------------------------------------------------------
+@contextlib.contextmanager
+def _call_guidance(spec, warnings):
+    """spec.guidance as the pipeline's CFG for the duration of ONE call, then
+    the instance's own value back (UI slider, config). Every MOSS render reads
+    cz_pipeline.GUIDANCE through _qwen_call, so swapping it covers gen, the
+    detailer, img2img / upscale and inpaint alike. The Gradio queue runs one
+    job at a time: no UI render can see the override. Yields the value
+    applied (None when the spec carries none)."""
+    g = spec.get("guidance")
+    if g is None:
+        yield None
+        return
+    import cz_pipeline
+    if not hasattr(cz_pipeline, "GUIDANCE"):
+        warnings.append("'guidance' not applied: this pipeline exposes no "
+                        "GUIDANCE setting")
+        yield None
+        return
+    old = cz_pipeline.GUIDANCE
+    cz_pipeline.GUIDANCE = float(g)
+    if float(old) != float(g):
+        _log(f"protocol: cfg {float(g):g} for this call (instance setting "
+            f"{float(old):g}, restored after)")
+    try:
+        yield float(g)
+    finally:
+        cz_pipeline.GUIDANCE = old
+
+
 def run_gen(spec, warnings=None, route="local"):
+    """Generate ONE image from a VALIDATED spec, with spec.guidance (if any)
+    as the CFG of this call only. See _run_gen."""
+    warnings = list(warnings or [])
+    with _call_guidance(spec, warnings) as g:
+        res = _run_gen(spec, warnings, route)
+    if g is not None:
+        res["guidance"] = g
+    return res
+
+
+def _run_gen(spec, warnings=None, route="local"):
     """Generate ONE image from a VALIDATED spec. Loads the pipeline when
     needed (cold path) - never call this while an instance is rendering on
     the same GPU: that is what the remote route is for."""
@@ -679,6 +724,17 @@ def _pick_esrgan(models, factor):
 
 
 def run_upscale(spec, warnings=None, route="local"):
+    """Upscale / img2img ONE image, with spec.guidance (if any) as the CFG of
+    this call only. See _run_upscale."""
+    warnings = list(warnings or [])
+    with _call_guidance(spec, warnings) as g:
+        res = _run_upscale(spec, warnings, route)
+    if g is not None:
+        res["guidance"] = g
+    return res
+
+
+def _run_upscale(spec, warnings=None, route="local"):
     """Upscale ONE image (ESRGAN + refine, the tool's pipeline) from a VALID
     spec. The family's print output: comic panels generated at ~1 MP come up
     to print resolution through here. The prompt (optional) guides the refine
@@ -774,6 +830,17 @@ def handle_edit_json(spec_json):
 
 
 def run_inpaint(spec, warnings=None, route="local"):
+    """Inpaint ONE image, with spec.guidance (if any) as the CFG of this call
+    only. See _run_inpaint."""
+    warnings = list(warnings or [])
+    with _call_guidance(spec, warnings) as g:
+        res = _run_inpaint(spec, warnings, route)
+    if g is not None:
+        res["guidance"] = g
+    return res
+
+
+def _run_inpaint(spec, warnings=None, route="local"):
     """Inpaint ONE image from a VALID spec: the WHITE area of the mask is
     redrawn from the prompt (the tool's inpaint pipeline, the same code as the
     Inpaint tab). The prompt describes what must appear IN the area (a local
