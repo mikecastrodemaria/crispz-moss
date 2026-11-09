@@ -569,11 +569,75 @@ def _call_guidance(spec, warnings):
         cz_pipeline.GUIDANCE = old
 
 
+def _resolve_draft(name):
+    """A draft preset name ('moss-turbo-4-steps', 'Draft (4 steps, Turbo LoRA)',
+    'moss-dmd-8-steps') -> its LoRA file, found on disk or downloaded once
+    (licence in the log), exactly what the UI's Performance preset does. Any
+    other name is returned as is (resolved later by cz_pipeline)."""
+    try:
+        import cz_edit_loras
+    except Exception:
+        return name
+    if not hasattr(cz_edit_loras, "draft_spec") or \
+            cz_edit_loras.draft_spec(name) is None:
+        return name
+    return cz_edit_loras.resolve_draft(name)
+
+
+def _lora_slots(spec, resolve_drafts=True):
+    """spec.loras -> [(name_or_path, weight)]. 'name:0.8' carries its weight,
+    a bare name takes the default; a Windows path's drive colon is never read
+    as a weight."""
+    import cz_pipeline
+    slots = []
+    for s in spec.get("loras") or []:
+        head, _, tail = str(s).rpartition(":")
+        try:
+            name, weight = head, float(tail)
+            if not name:
+                raise ValueError
+        except ValueError:
+            name, weight = str(s), float(cz_pipeline.LORA_WEIGHT)
+        slots.append((_resolve_draft(name) if resolve_drafts else name, weight))
+    return slots
+
+
+def _apply_spec_loras(spec):
+    """spec.loras on the base pipe for THIS call (gen, upscale / img2img,
+    inpaint). No loras in the spec = the app's own set, untouched. The app's
+    set comes back after the call (_keep_app_loras)."""
+    import cz_pipeline
+    if spec.get("loras") and hasattr(cz_pipeline, "set_loras"):
+        cz_pipeline.set_loras(_lora_slots(spec))
+
+
+@contextlib.contextmanager
+def _keep_app_loras():
+    """The app's LoRA set (its UI slots) back after a protocol call that set
+    its own: before 2026-11-09 a gen with spec.loras left them loaded in the
+    app, and the user's next render inherited them. Restored even when the
+    render fails; hot-swapped back on the app's next run."""
+    import cz_pipeline
+    if not hasattr(cz_pipeline, "LORAS"):
+        yield
+        return
+    old = list(cz_pipeline.LORAS)
+    try:
+        yield
+    finally:
+        if list(cz_pipeline.LORAS) != old:
+            cz_pipeline.LORAS = old
+            _log("protocol: the app's LoRAs are back ("
+                 + (", ".join(f"{os.path.basename(str(p))}@{w}" for p, w in old)
+                    or "none") + "), applied on its next run")
+
+
 def run_gen(spec, warnings=None, route="local"):
     """Generate ONE image from a VALIDATED spec, with spec.guidance (if any)
-    as the CFG of this call only. See _run_gen."""
+    as the CFG and spec.loras (if any) as the LoRAs of this call only. See
+    _run_gen."""
     warnings = list(warnings or [])
-    with _call_guidance(spec, warnings) as g:
+    with _call_guidance(spec, warnings) as g, _keep_app_loras():
         res = _run_gen(spec, warnings, route)
     if g is not None:
         res["guidance"] = g
@@ -605,28 +669,21 @@ def _run_gen(spec, warnings=None, route="local"):
     if not spec["prompt"]:
         raise SpecError("prompt contained only <lora:...> tags - describe "
                         "the image too")
-    slots = []
-    for s in spec.get("loras") or []:
-        head, _, tail = str(s).rpartition(":")
-        try:
-            slots.append((head, float(tail)))
-        except ValueError:
-            slots.append((str(s), cz_pipeline.LORA_WEIGHT))
     refs = spec.get("refs") or []
     if refs and hasattr(cz_pipeline, "set_edit_loras"):
         # omni/edit route: the LoRAs go on the EDIT pipe (a set separate from
         # the base one), and a cz_edit_loras preset name is resolved there
         # (downloaded on demand). Without loras -> the edit set is empty for
         # this call (the spec stands alone: the UI's presets do not reach it).
-        cz_pipeline.set_edit_loras(slots)
+        cz_pipeline.set_edit_loras(_lora_slots(spec, resolve_drafts=False))
         cz_pipeline.set_edit_loras_enabled(True)
-    elif slots:
+    else:
         # Base, or the pipeline of a family tool with no edit set
         # (cz_protocol.py is shared): the old behaviour, with a warning.
-        if refs:
+        if refs and spec.get("loras"):
             warnings.append("loras applied on the base pipe (this pipeline "
                             "has no edit LoRA set)")
-        cz_pipeline.set_loras(slots)
+        _apply_spec_loras(spec)
     steps = spec.get("steps") or int(CONFIG.get("default_gen_steps", 8))
     refs = spec.get("refs") or []
     if refs:
@@ -724,10 +781,10 @@ def _pick_esrgan(models, factor):
 
 
 def run_upscale(spec, warnings=None, route="local"):
-    """Upscale / img2img ONE image, with spec.guidance (if any) as the CFG of
-    this call only. See _run_upscale."""
+    """Upscale / img2img ONE image, with spec.guidance and spec.loras (if any)
+    for this call only. See _run_upscale."""
     warnings = list(warnings or [])
-    with _call_guidance(spec, warnings) as g:
+    with _call_guidance(spec, warnings) as g, _keep_app_loras():
         res = _run_upscale(spec, warnings, route)
     if g is not None:
         res["guidance"] = g
@@ -775,6 +832,7 @@ def _run_upscale(spec, warnings=None, route="local"):
     from cz_prompt import resolve_seed
     seed_used = resolve_seed(spec.get("seed", -1))
     spec = _expand_spec(spec, seed_used)
+    _apply_spec_loras(spec)           # the refine pass runs on the base pipe
     with Image.open(spec["input"]) as im:
         img, timings = cz_pipeline.process_one(
             im.convert("RGB"), model, factor, denoise,
@@ -830,10 +888,10 @@ def handle_edit_json(spec_json):
 
 
 def run_inpaint(spec, warnings=None, route="local"):
-    """Inpaint ONE image, with spec.guidance (if any) as the CFG of this call
-    only. See _run_inpaint."""
+    """Inpaint ONE image, with spec.guidance and spec.loras (if any) for this
+    call only. See _run_inpaint."""
     warnings = list(warnings or [])
-    with _call_guidance(spec, warnings) as g:
+    with _call_guidance(spec, warnings) as g, _keep_app_loras():
         res = _run_inpaint(spec, warnings, route)
     if g is not None:
         res["guidance"] = g
@@ -864,6 +922,7 @@ def _run_inpaint(spec, warnings=None, route="local"):
         seed_used = random.randint(0, 2**31 - 1)
     cz_pipeline._LAST_SEED = seed_used
     spec = _expand_spec(spec, seed_used)        # {a|b|c} + wildcards, then LoRA tags
+    _apply_spec_loras(spec)
     with Image.open(spec["input"]) as im, Image.open(spec["mask"]) as mk:
         bg = im.convert("RGB")
         mask = mk.convert("L")

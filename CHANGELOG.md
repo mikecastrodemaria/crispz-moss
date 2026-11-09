@@ -7,6 +7,15 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## 1.0.0 (2026-11-05, crispz-moss) : crispz-ideogram ported to MOSS-Image
 
+- **Protocol: `loras` per call on img2img and inpaint too** (2026-11-09, for
+  crispz-motion): `spec.loras` reached `gen` only; `upscale` (img2img at factor 1) and
+  `inpaint` rendered with whatever LoRAs the app had loaded. They now apply the spec's
+  LoRAs on the base pipe, and a draft preset name (`moss-turbo-4-steps`,
+  `moss-turbo-3-steps`, `moss-dmd-8-steps`) resolves to its file like the Performance
+  preset (fp32 kept for the Turbo). The app's own LoRA slots come back after every
+  protocol call, even a failing one (a `gen` with LoRAs used to leave them loaded in the
+  app for the user's next render), said in the log. No `loras` in the spec = the app's
+  slots, as before. Tests in `test_protocol`.
 - **Protocol: `guidance` per call on every op** (2026-11-09, for crispz-motion): the
   protocol applied `spec.guidance` to `edit` only and warned "not applied" on `gen`,
   `upscale` and `inpaint`. It is now the CFG of that call on all four (0 to 20, a

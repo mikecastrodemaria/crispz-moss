@@ -311,8 +311,12 @@ family protocol: `czp caps` / `czp gen --spec spec.json` (routes to the running 
 else runs locally). `caps` says what is emulated (`supports.emulated`). A spec may
 carry `guidance` on every op (`gen`, `upscale`, `inpaint`, `edit`): it is the CFG of
 that call only, the app's slider is restored after it and the log says so
-(`supports.guidance`). This is how a caller such as crispz-motion renders with the
-Turbo LoRA (CFG 1) while the app stays at CFG 3.
+(`supports.guidance`). `loras` works the same way on `gen`, `upscale` and `inpaint`:
+the LoRAs of that call, the app's own slots back afterwards; a draft preset name
+(`moss-turbo-4-steps`, `moss-turbo-3-steps`, `moss-dmd-8-steps`) resolves to its file
+like the Performance preset (downloaded once if absent). A spec without `loras` renders
+with the app's slots. This is how a caller such as crispz-motion renders with the Turbo
+LoRA at CFG 1 while the app stays on its own preset.
 
 ## Tests
 
