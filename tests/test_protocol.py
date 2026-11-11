@@ -197,9 +197,15 @@ class _FakePipeline(types.ModuleType):
         return Image.new("RGB", (w, h), "#204060"), {"txt2img": 1.5}
 
     def process_one(self, image, model, factor, denoise, steps, prompt, seed,
-                    tile, overlap, do_esrgan=True):
+                    tile, overlap, do_esrgan=True, **kw):
         self._seen()
+        self.calls["process_one"] = {"denoise": denoise, "prompt": prompt,
+                                     "do_esrgan": do_esrgan, **kw}
         return image.copy(), {"refine": 0.5}
+
+    def refine_tiling_notes(self, w, h, denoise, prompt, auto_tile=True, refine_tile=None):
+        self.calls["notes"] = (w, h, denoise, prompt)
+        return [f"refine of {w}x{h} runs in tiles"]
 
     def inpaint_run(self, bg, mask, prompt, steps, denoise, seed):
         self._seen()
@@ -370,6 +376,53 @@ def test_spec_loras_apply_to_every_op_and_the_app_set_comes_back():
         else:
             sys.modules.pop("cz_esrgan", None)
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_a_variation_refines_the_whole_image_with_its_denoise_and_prompt():
+    # crispz-motion lot 2: a 1088x1920 variation went through the 4K tile rules
+    # (denoise capped at 0.40, empty prompt per tile), so every chained key came out
+    # the same whatever its denoise or prompt, and the answer said nothing.
+    d = tempfile.mkdtemp(prefix="cz_proto_v_")
+    old_esrgan = sys.modules.get("cz_esrgan")
+    sys.modules["cz_esrgan"] = types.SimpleNamespace(
+        list_esrgan_models=lambda: ["4x-ClearRealityV1.safetensors"], ESRGAN_DIR=d)
+    try:
+        src = os.path.join(d, "src.png")
+        Image.new("RGB", (1088, 1920), "#336699").save(src)
+        base = {"protocol": 1, "op": "upscale", "input": src, "prompt": "looks left",
+                "seed": 7, "out_dir": d}
+        with _fake_pipeline() as fake:
+            spec, w = cp.validate_spec(dict(base, factor=1.0, denoise=0.75), op="upscale")
+            res = cp.run_upscale(spec, w)
+            po = fake.calls["process_one"]
+            assert po["auto_tile"] is False and po["refine_tile"] == 0
+            assert po["denoise"] == 0.75 and po["prompt"] == "looks left"
+            assert "notes" not in fake.calls and res["warnings"] == []
+            # a real upscale keeps the tile rules, and the answer says what they change
+            spec, w = cp.validate_spec(dict(base, factor=2.0, denoise=0.5), op="upscale")
+            res = cp.run_upscale(spec, w)
+            assert "auto_tile" not in fake.calls["process_one"]
+            assert fake.calls["notes"][:2] == (2176, 3840)
+            assert any("tiles" in x for x in res["warnings"])
+    finally:
+        if old_esrgan is not None:
+            sys.modules["cz_esrgan"] = old_esrgan
+        else:
+            sys.modules.pop("cz_esrgan", None)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_refine_tiling_notes_name_the_cap_and_the_prompt():
+    import cz_pipeline
+    assert cz_pipeline.refine_tiling_notes(1024, 1024, 0.6, "a cat", auto_tile=True,
+                                           refine_tile=0) == []
+    notes = cz_pipeline.refine_tiling_notes(2176, 3840, 0.6, "a cat", refine_tile=0)
+    if cz_pipeline._TILE_DENOISE_CAP > 0:
+        assert any("lowered" in n for n in notes)
+    if cz_pipeline._tile_prompt("a cat") != "a cat":
+        assert any("prompt" in n for n in notes)
+    assert cz_pipeline.refine_tiling_notes(2176, 3840, 0.6, "a cat", auto_tile=False,
+                                           refine_tile=0) == []
 
 
 def test_lora_slots_weights_and_windows_paths():

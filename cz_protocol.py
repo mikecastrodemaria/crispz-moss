@@ -81,6 +81,10 @@ SPEC_FIELDS = ("protocol", "op", "prompt", "negative", "width", "height",
 _DEF_URL = "http://127.0.0.1:7860"
 
 MAX_REFS = 4                      # the Moss-Image-Edit LoRA: the image to edit + up to 3 references
+# A variation (upscale, factor <= 1) refines the whole image up to this many pixels: MOSS
+# extrapolates to about 4 Mpx in one pass. Beyond, the tiled refine (and its rules,
+# reported in the answer's warnings).
+VARIATION_WHOLE_MAX_PX = 4_200_000
 
 # spec.fast (op edit) -> the mode name on the cz_pipeline.set_edit_speed side
 # klein has no speed preset: the model is already distilled to 4 steps and no FLUX.2
@@ -834,11 +838,23 @@ def _run_upscale(spec, warnings=None, route="local"):
     spec = _expand_spec(spec, seed_used)
     _apply_spec_loras(spec)           # the refine pass runs on the base pipe
     with Image.open(spec["input"]) as im:
+        iw, ih = im.size
+        # A variation (factor <= 1) is an img2img at the image's own size: it runs on
+        # the WHOLE image with the requested denoise and prompt, up to the size MOSS
+        # renders in one pass. The tile rules (per-tile denoise cap, empty prompt per
+        # tile) exist for upscales to 4K+; applied to a 1088x1920 variation they made
+        # every denoise 0.40 and dropped the prompt, in silence (crispz-motion lot 2).
+        whole = not do_esrgan and iw * ih <= VARIATION_WHOLE_MAX_PX
+        kw = {"auto_tile": False, "refine_tile": 0} if whole else {}
+        rw, rh = (iw, ih) if not do_esrgan else (round(iw * factor), round(ih * factor))
+        notes = getattr(cz_pipeline, "refine_tiling_notes", None)
+        if notes is not None and not whole:
+            warnings += notes(rw, rh, denoise, spec.get("prompt", ""))
         img, timings = cz_pipeline.process_one(
             im.convert("RGB"), model, factor, denoise,
             steps, spec.get("prompt", ""), seed_used,
             int(CONFIG.get("default_tile", 0)),
-            int(CONFIG.get("default_overlap", 16)), do_esrgan=do_esrgan)
+            int(CONFIG.get("default_overlap", 16)), do_esrgan=do_esrgan, **kw)
     path = build_output_path(None, "local", spec.get("out_dir"), "png",
                              tag="czp_upscale", seed=seed_used,
                              size=img.size)
