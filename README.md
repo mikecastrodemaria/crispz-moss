@@ -11,8 +11,7 @@ attached. The other crispz studios stay better at photos and editing.
 > RTX 5090: the engine and the single-file loaders, the layout editor, the magic prompt
 > and Describe, the emulated img2img / inpaint / outpaint, LoRAs and editing with
 > references, the local tools and the hand-overs, the GPU end-to-end test and this
-> documentation. The specification and the work log (every measurement, every decision)
-> are in `CLAUDE.md`.
+> documentation.
 
 ## Licence: read this first
 
@@ -342,4 +341,4 @@ OpenMOSS for MOSS-Image and its pipeline (Apache 2.0, vendored in
 VAE); hide1 for the MOSS-Image Character Catalog (MIT for the data; the characters are
 third-party IP); diffusers and transformers; vtracer (MIT); rembg (MIT); the crispz family
 (crispz-klein, crispz-flux3, crispz-ideogram) this studio is forked from. How and why:
-[FORK.md](FORK.md); the full work log: [CLAUDE.md](CLAUDE.md).
+[FORK.md](FORK.md).
