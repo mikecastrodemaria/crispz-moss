@@ -7,6 +7,23 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## 1.0.0 (2026-11-05, crispz-moss) : crispz-ideogram ported to MOSS-Image
 
+- **Protocol: `loras` per call on img2img and inpaint too** (2026-11-09, for
+  crispz-motion): `spec.loras` reached `gen` only; `upscale` (img2img at factor 1) and
+  `inpaint` rendered with whatever LoRAs the app had loaded. They now apply the spec's
+  LoRAs on the base pipe, and a draft preset name (`moss-turbo-4-steps`,
+  `moss-turbo-3-steps`, `moss-dmd-8-steps`) resolves to its file like the Performance
+  preset (fp32 kept for the Turbo). The app's own LoRA slots come back after every
+  protocol call, even a failing one (a `gen` with LoRAs used to leave them loaded in the
+  app for the user's next render), said in the log. No `loras` in the spec = the app's
+  slots, as before. Tests in `test_protocol`.
+- **Protocol: `guidance` per call on every op** (2026-11-09, for crispz-motion): the
+  protocol applied `spec.guidance` to `edit` only and warned "not applied" on `gen`,
+  `upscale` and `inpaint`. It is now the CFG of that call on all four (0 to 20, a
+  wrong value is code 2), the app's slider is restored after the call, even when the
+  render fails, and the log says it once per call (`protocol: cfg 1 for this call`).
+  `caps` announces `supports.guidance`, the result echoes `guidance`. A distilled
+  preset (Turbo 4 steps, DMD 8 steps: CFG 1) is now usable from a caller while the
+  app stays at CFG 3. Tests in `test_protocol`.
 - **Extra folder lists on Linux** (2026-11-07, whole family): `loras_extra_dirs` and the
   other 'a;b' folder lists were split on os.pathsep blindly, so on Linux (the CI) a
   Windows path in a shared preferences.json broke on its drive colon ('X:/a;Y:/b' into

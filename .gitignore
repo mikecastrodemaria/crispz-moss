@@ -1,6 +1,8 @@
 # --- Claude Code / local tools ---
 .claude/
 CLAUDE.local.md
+CLAUDE.md
+FORK-*-CLAUDE.md
 *.local.json
 settings.local.json
 

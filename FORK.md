@@ -6,7 +6,7 @@
 - Pourquoi cette base et pas crispz-flux3 : l'éditeur de légende avec boîtes à la souris,
   les presets de design, le magic prompt et le Describe, l'img2img et l'inpaint émulés
   sur ce même VAE, l'offload « encodeur seul » déjà écrit pour un encodeur Qwen de 8 à
-  9B. Le détail est dans `CLAUDE.md` §3.
+  9B.
 
 ## Ce qui change par rapport à crispz-ideogram
 
@@ -27,13 +27,12 @@
 | Catalogue | aucun | MOSS-Image Character Catalog dans l'Asset Browser, « Send to crispz-moss » |
 | Offload | encodeur seul | encodeur seul, le DiT garé pendant l'encodage (`moss_encode_swap`), texte encodé avant tout VAE |
 
-Les notes de crispz-ideogram sont gardées dans `FORK-ideogram.md` et
-`FORK-ideogram-CLAUDE.md` (pièges d'environnement, mesures), celles de crispz-flux3 dans
-`FORK-flux3.md` et `FORK-flux3-CLAUDE.md`.
+Les notes de crispz-ideogram sont gardées dans `FORK-ideogram.md`, celles de
+crispz-flux3 dans `FORK-flux3.md`.
 
 ## Mesures
 
-Voir `README.md` (tableau RTX 5090) et `CLAUDE.md` §9 pour les passages détaillés. En
+Voir `README.md` (tableau RTX 5090) pour les passages détaillés. En
 bref, sur la même carte : 1024 en 43 s contre 61 s pour Ideogram 4, 2 Mpx en 102 s contre
 394 s pour 4 Mpx, pic 15 Go contre 23 ; A/B texte 24 rendus sur 24 exacts. Le prix : 27 Go
 de poids bf16 (un encodeur de 16,8 Go en RAM entre deux prompts) contre 15 Go nf4.

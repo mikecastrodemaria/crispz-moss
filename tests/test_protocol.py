@@ -65,12 +65,23 @@ def test_validate_spec_unknown_field_warns_never_fails():
     assert any("qwen_only_knob" in w for w in warnings)
 
 
-def test_validate_spec_guidance_count_warn():
-    _spec, warnings = cp.validate_spec(
+def test_validate_spec_guidance_kept_count_warn():
+    # guidance is a per-call CFG on every op since 2026-11-09: kept, no warning
+    spec, warnings = cp.validate_spec(
         {"protocol": 1, "prompt": "x", "guidance": 3.5, "count": 4})
     text = " ".join(warnings)
-    assert "guidance" in text
+    assert spec["guidance"] == 3.5
+    assert "guidance" not in text
     assert "count forced to 1" in text
+    _spec, warnings = cp.validate_spec({"protocol": 1, "prompt": "x"})
+    assert "guidance" not in _spec
+    for bad in ("high", -1, 21):
+        try:
+            cp.validate_spec({"protocol": 1, "prompt": "x", "guidance": bad})
+        except cp.SpecError as e:
+            assert e.code == 2
+        else:
+            raise AssertionError(f"guidance {bad!r} should raise")
 
 
 def test_validate_spec_bad_values_are_code_2():
@@ -162,21 +173,43 @@ def test_validate_refs_capped_at_max():
 class _FakePipeline(types.ModuleType):
     LORA_WEIGHT = 1.0
     _LAST_SEED = 424242
+    GUIDANCE = 3.0          # the instance's slider (MOSS default)
 
     def __init__(self):
         super().__init__("cz_pipeline")
         self.calls = {"loras": None, "model": None, "gen": None,
-                      "omni": None, "omni_kw": None}
+                      "omni": None, "omni_kw": None, "cfg_seen": None}
 
     def set_loras(self, slots):
         self.calls["loras"] = slots
+        self.LORAS = [(p, float(w)) for p, w in slots]
 
     def set_zimage_model(self, m):
         self.calls["model"] = m
 
+    def _seen(self):
+        self.calls["cfg_seen"] = self.GUIDANCE
+        self.calls["loras_seen"] = list(self.LORAS)
+
     def txt2img_run(self, prompt, w, h, steps, seed, negative=""):
         self.calls["gen"] = (prompt, w, h, steps, seed, negative)
+        self._seen()
         return Image.new("RGB", (w, h), "#204060"), {"txt2img": 1.5}
+
+    def process_one(self, image, model, factor, denoise, steps, prompt, seed,
+                    tile, overlap, do_esrgan=True, **kw):
+        self._seen()
+        self.calls["process_one"] = {"denoise": denoise, "prompt": prompt,
+                                     "do_esrgan": do_esrgan, **kw}
+        return image.copy(), {"refine": 0.5}
+
+    def refine_tiling_notes(self, w, h, denoise, prompt, auto_tile=True, refine_tile=None):
+        self.calls["notes"] = (w, h, denoise, prompt)
+        return [f"refine of {w}x{h} runs in tiles"]
+
+    def inpaint_run(self, bg, mask, prompt, steps, denoise, seed):
+        self._seen()
+        return bg.copy()
 
     def generate_omni(self, refs, prompt, negative, w, h, steps, seed, **kw):
         # **kw: the optional kwargs some forks pass to the omni call
@@ -191,6 +224,7 @@ class _FakePipeline(types.ModuleType):
 @contextlib.contextmanager
 def _fake_pipeline():
     fake = _FakePipeline()
+    fake.LORAS = [("C:/loras/app_style.safetensors", 0.7)]   # the app's UI slots
     old = sys.modules.get("cz_pipeline")
     sys.modules["cz_pipeline"] = fake
     try:
@@ -243,6 +277,177 @@ def test_run_gen_explicit_seed_is_passed_and_reported():
         assert fake.calls["gen"][4] == 42
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_spec_guidance_is_the_cfg_of_that_call_only_on_every_op():
+    # crispz-motion drives the Turbo LoRA (CFG 1) through the protocol while
+    # the instance slider stays at 3.0: gen, upscale (img2img at factor 1) and
+    # inpaint render at the spec's CFG, the slider comes back after each call,
+    # and a spec without guidance keeps the slider.
+    d = tempfile.mkdtemp(prefix="cz_proto_g_")
+    old_esrgan = sys.modules.get("cz_esrgan")
+    sys.modules["cz_esrgan"] = types.SimpleNamespace(
+        list_esrgan_models=lambda: [], ESRGAN_DIR=d)
+    try:
+        src = os.path.join(d, "src.png")
+        mask = os.path.join(d, "mask.png")
+        Image.new("RGB", (64, 64), "#336699").save(src)
+        Image.new("L", (64, 64), 255).save(mask)
+        base = {"protocol": 1, "prompt": "x", "width": 64, "height": 64,
+                "seed": 7, "out_dir": d}
+        cases = (("gen", cp.run_gen, {}),
+                 ("upscale", cp.run_upscale, {"input": src, "factor": 1.0,
+                                              "denoise": 0.35}),
+                 ("inpaint", cp.run_inpaint, {"input": src, "mask": mask}))
+        with _fake_pipeline() as fake:
+            for op, run, extra in cases:
+                spec, w = cp.validate_spec(dict(base, op=op, guidance=1.0,
+                                                **extra), op=op)
+                res = run(spec, w)
+                assert res["ok"], (op, res)
+                assert fake.calls["cfg_seen"] == 1.0, op
+                assert res["guidance"] == 1.0, op
+                assert fake.GUIDANCE == 3.0, f"{op}: slider not restored"
+                assert not any("guidance" in x for x in res["warnings"]), op
+                spec, w = cp.validate_spec(dict(base, op=op, **extra), op=op)
+                res = run(spec, w)
+                assert fake.calls["cfg_seen"] == 3.0, op
+                assert "guidance" not in res, op
+        assert cp.caps_dict()["supports"]["guidance"] is True
+    finally:
+        if old_esrgan is not None:
+            sys.modules["cz_esrgan"] = old_esrgan
+        else:
+            sys.modules.pop("cz_esrgan", None)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_spec_loras_apply_to_every_op_and_the_app_set_comes_back():
+    # crispz-motion chains keys through upscale (img2img) with the Turbo LoRA:
+    # spec.loras must reach upscale and inpaint, not only gen; a draft preset
+    # name resolves to its file like the UI's Performance preset; the app's own
+    # slots are back after each call; no spec.loras = the app's set.
+    import cz_edit_loras
+    d = tempfile.mkdtemp(prefix="cz_proto_l_")
+    old_esrgan = sys.modules.get("cz_esrgan")
+    sys.modules["cz_esrgan"] = types.SimpleNamespace(
+        list_esrgan_models=lambda: [], ESRGAN_DIR=d)
+    turbo = os.path.join(d, "moss-turbo-4-steps.safetensors")
+    old_resolve = cz_edit_loras.resolve_draft
+    cz_edit_loras.resolve_draft = lambda name, **k: turbo
+    try:
+        src = os.path.join(d, "src.png")
+        mask = os.path.join(d, "mask.png")
+        Image.new("RGB", (64, 64), "#336699").save(src)
+        Image.new("L", (64, 64), 255).save(mask)
+        base = {"protocol": 1, "prompt": "x", "width": 64, "height": 64,
+                "seed": 7, "out_dir": d}
+        cases = (("gen", cp.run_gen, {}),
+                 ("upscale", cp.run_upscale, {"input": src, "factor": 1.0,
+                                              "denoise": 0.35}),
+                 ("inpaint", cp.run_inpaint, {"input": src, "mask": mask}))
+        with _fake_pipeline() as fake:
+            app = list(fake.LORAS)
+            for op, run, extra in cases:
+                spec, w = cp.validate_spec(dict(
+                    base, op=op, loras=["moss-turbo-4-steps:1", "ink:0.5"],
+                    **extra), op=op)
+                res = run(spec, w)
+                assert res["ok"], (op, res)
+                assert fake.calls["loras_seen"] == [(turbo, 1.0), ("ink", 0.5)], op
+                assert fake.LORAS == app, f"{op}: the app's LoRAs not restored"
+                spec, w = cp.validate_spec(dict(base, op=op, **extra), op=op)
+                run(spec, w)
+                assert fake.calls["loras_seen"] == app, op
+            # a failing render still gives the app its LoRAs back
+            fake.process_one = lambda *a, **k: (_ for _ in ()).throw(
+                RuntimeError("boom"))
+            spec, w = cp.validate_spec(dict(base, op="upscale", loras=["ink"],
+                                            input=src, factor=1.0), op="upscale")
+            try:
+                cp.run_upscale(spec, w)
+            except RuntimeError:
+                pass
+            assert fake.LORAS == app
+    finally:
+        cz_edit_loras.resolve_draft = old_resolve
+        if old_esrgan is not None:
+            sys.modules["cz_esrgan"] = old_esrgan
+        else:
+            sys.modules.pop("cz_esrgan", None)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_a_variation_refines_the_whole_image_with_its_denoise_and_prompt():
+    # crispz-motion lot 2: a 1088x1920 variation went through the 4K tile rules
+    # (denoise capped at 0.40, empty prompt per tile), so every chained key came out
+    # the same whatever its denoise or prompt, and the answer said nothing.
+    d = tempfile.mkdtemp(prefix="cz_proto_v_")
+    old_esrgan = sys.modules.get("cz_esrgan")
+    sys.modules["cz_esrgan"] = types.SimpleNamespace(
+        list_esrgan_models=lambda: ["4x-ClearRealityV1.safetensors"], ESRGAN_DIR=d)
+    try:
+        src = os.path.join(d, "src.png")
+        Image.new("RGB", (1088, 1920), "#336699").save(src)
+        base = {"protocol": 1, "op": "upscale", "input": src, "prompt": "looks left",
+                "seed": 7, "out_dir": d}
+        with _fake_pipeline() as fake:
+            spec, w = cp.validate_spec(dict(base, factor=1.0, denoise=0.75), op="upscale")
+            res = cp.run_upscale(spec, w)
+            po = fake.calls["process_one"]
+            assert po["auto_tile"] is False and po["refine_tile"] == 0
+            assert po["denoise"] == 0.75 and po["prompt"] == "looks left"
+            assert "notes" not in fake.calls and res["warnings"] == []
+            # a real upscale keeps the tile rules, and the answer says what they change
+            spec, w = cp.validate_spec(dict(base, factor=2.0, denoise=0.5), op="upscale")
+            res = cp.run_upscale(spec, w)
+            assert "auto_tile" not in fake.calls["process_one"]
+            assert fake.calls["notes"][:2] == (2176, 3840)
+            assert any("tiles" in x for x in res["warnings"])
+    finally:
+        if old_esrgan is not None:
+            sys.modules["cz_esrgan"] = old_esrgan
+        else:
+            sys.modules.pop("cz_esrgan", None)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_refine_tiling_notes_name_the_cap_and_the_prompt():
+    import cz_pipeline
+    assert cz_pipeline.refine_tiling_notes(1024, 1024, 0.6, "a cat", auto_tile=True,
+                                           refine_tile=0) == []
+    notes = cz_pipeline.refine_tiling_notes(2176, 3840, 0.6, "a cat", refine_tile=0)
+    if cz_pipeline._TILE_DENOISE_CAP > 0:
+        assert any("lowered" in n for n in notes)
+    if cz_pipeline._tile_prompt("a cat") != "a cat":
+        assert any("prompt" in n for n in notes)
+    assert cz_pipeline.refine_tiling_notes(2176, 3840, 0.6, "a cat", auto_tile=False,
+                                           refine_tile=0) == []
+
+
+def test_lora_slots_weights_and_windows_paths():
+    with _fake_pipeline():
+        spec = {"loras": ["a.safetensors:0.8", "b", "D:/x/c.safetensors",
+                          "D:/x/d.safetensors:0.3"]}
+        assert cp._lora_slots(spec, resolve_drafts=False) == [
+            ("a.safetensors", 0.8), ("b", 1.0), ("D:/x/c.safetensors", 1.0),
+            ("D:/x/d.safetensors", 0.3)]
+
+
+def test_spec_guidance_is_restored_when_the_render_fails():
+    with _fake_pipeline() as fake:
+        def boom(*a, **k):
+            raise RuntimeError("out of memory")
+        fake.txt2img_run = boom
+        spec, w = cp.validate_spec({"protocol": 1, "prompt": "x",
+                                    "guidance": 1.0, "out_dir": tempfile.gettempdir()})
+        try:
+            cp.run_gen(spec, w)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("the render error must propagate")
+        assert fake.GUIDANCE == 3.0
 
 
 def test_run_gen_with_refs_takes_the_omni_route():

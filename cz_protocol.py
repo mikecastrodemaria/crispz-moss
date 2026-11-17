@@ -17,8 +17,9 @@ Output: always ONE JSON line on stdout. Exit codes:
     0 ok - 1 run error - 2 invalid spec - 3 unsupported op/protocol -
     4 no route (no instance and no local execution possible).
 
-v1: one image per call (the caller loops); guidance is accepted but not
-applied (warning, never silent); on the remote route spec.model is ignored
+v1: one image per call (the caller loops); spec.guidance, when present, is
+the CFG of THAT call on every op (the instance's slider is restored after it,
+said in the log); on the remote route spec.model is ignored
 with a warning (we never swap the model of the user's running instance under
 their feet).
 
@@ -41,6 +42,7 @@ import sys
 import json
 import time
 import argparse
+import contextlib
 import re
 import urllib.request
 
@@ -79,6 +81,10 @@ SPEC_FIELDS = ("protocol", "op", "prompt", "negative", "width", "height",
 _DEF_URL = "http://127.0.0.1:7860"
 
 MAX_REFS = 4                      # the Moss-Image-Edit LoRA: the image to edit + up to 3 references
+# A variation (upscale, factor <= 1) refines the whole image up to this many pixels: MOSS
+# extrapolates to about 4 Mpx in one pass. Beyond, the tiled refine (and its rules,
+# reported in the answer's warnings).
+VARIATION_WHOLE_MAX_PX = 4_200_000
 
 # spec.fast (op edit) -> the mode name on the cz_pipeline.set_edit_speed side
 # klein has no speed preset: the model is already distilled to 4 steps and no FLUX.2
@@ -241,6 +247,8 @@ def caps_dict():
                          "edit_presets": bool(_edit_lora_catalog()),
                          "inpaint": FAMILY_CAPS["inpaint"],
                          "img2img": FAMILY_CAPS["img2img"],
+                         # spec.guidance = the CFG of that call, every op
+                         "guidance": True,
                          "emulated": list(EMULATED_CAPS),
                          "cloud": _cloud_caps()},
             "model_loaded": _model_loaded(),
@@ -479,15 +487,16 @@ def validate_spec(spec, op="gen"):
             raise SpecError("invalid 'steps'")
     out["steps"] = steps
     if spec.get("guidance") is not None:
-        if op == "edit":
-            # Applied on the edit (per-call override): a distilled preset
-            # (Lightning / Rapid) wants 1.0 while the global slider stays at 4.
-            try:
-                out["guidance"] = float(spec["guidance"])
-            except (TypeError, ValueError):
-                raise SpecError("invalid 'guidance'")
-        else:
-            warnings.append("'guidance' not applied (v1: instance settings win)")
+        # Applied on EVERY op as a per-call override (edit since lot 4b; gen,
+        # upscale and inpaint since 2026-11-09, for crispz-motion): a distilled
+        # preset (Turbo 4 steps, DMD 8 steps) wants CFG 1.0 while the instance's
+        # slider stays at 3.0. The instance's own value is restored after the call.
+        try:
+            out["guidance"] = float(spec["guidance"])
+        except (TypeError, ValueError):
+            raise SpecError("invalid 'guidance'")
+        if not 0.0 <= out["guidance"] <= 20.0:
+            raise SpecError(f"'guidance' out of range (0-20): {out['guidance']}")
     # (crispz-klein warned here that guidance had no effect: true of a distilled model,
     # false of MOSS-Image, a real CFG. Removed.)
     refs = [str(r) for r in (spec.get("refs") or []) if str(r).strip()]
@@ -535,7 +544,111 @@ def validate_spec(spec, op="gen"):
 # ----------------------------------------------------------------------------
 # Local execution (heavy imports HERE only)
 # ----------------------------------------------------------------------------
+@contextlib.contextmanager
+def _call_guidance(spec, warnings):
+    """spec.guidance as the pipeline's CFG for the duration of ONE call, then
+    the instance's own value back (UI slider, config). Every MOSS render reads
+    cz_pipeline.GUIDANCE through _qwen_call, so swapping it covers gen, the
+    detailer, img2img / upscale and inpaint alike. The Gradio queue runs one
+    job at a time: no UI render can see the override. Yields the value
+    applied (None when the spec carries none)."""
+    g = spec.get("guidance")
+    if g is None:
+        yield None
+        return
+    import cz_pipeline
+    if not hasattr(cz_pipeline, "GUIDANCE"):
+        warnings.append("'guidance' not applied: this pipeline exposes no "
+                        "GUIDANCE setting")
+        yield None
+        return
+    old = cz_pipeline.GUIDANCE
+    cz_pipeline.GUIDANCE = float(g)
+    if float(old) != float(g):
+        _log(f"protocol: cfg {float(g):g} for this call (instance setting "
+            f"{float(old):g}, restored after)")
+    try:
+        yield float(g)
+    finally:
+        cz_pipeline.GUIDANCE = old
+
+
+def _resolve_draft(name):
+    """A draft preset name ('moss-turbo-4-steps', 'Draft (4 steps, Turbo LoRA)',
+    'moss-dmd-8-steps') -> its LoRA file, found on disk or downloaded once
+    (licence in the log), exactly what the UI's Performance preset does. Any
+    other name is returned as is (resolved later by cz_pipeline)."""
+    try:
+        import cz_edit_loras
+    except Exception:
+        return name
+    if not hasattr(cz_edit_loras, "draft_spec") or \
+            cz_edit_loras.draft_spec(name) is None:
+        return name
+    return cz_edit_loras.resolve_draft(name)
+
+
+def _lora_slots(spec, resolve_drafts=True):
+    """spec.loras -> [(name_or_path, weight)]. 'name:0.8' carries its weight,
+    a bare name takes the default; a Windows path's drive colon is never read
+    as a weight."""
+    import cz_pipeline
+    slots = []
+    for s in spec.get("loras") or []:
+        head, _, tail = str(s).rpartition(":")
+        try:
+            name, weight = head, float(tail)
+            if not name:
+                raise ValueError
+        except ValueError:
+            name, weight = str(s), float(cz_pipeline.LORA_WEIGHT)
+        slots.append((_resolve_draft(name) if resolve_drafts else name, weight))
+    return slots
+
+
+def _apply_spec_loras(spec):
+    """spec.loras on the base pipe for THIS call (gen, upscale / img2img,
+    inpaint). No loras in the spec = the app's own set, untouched. The app's
+    set comes back after the call (_keep_app_loras)."""
+    import cz_pipeline
+    if spec.get("loras") and hasattr(cz_pipeline, "set_loras"):
+        cz_pipeline.set_loras(_lora_slots(spec))
+
+
+@contextlib.contextmanager
+def _keep_app_loras():
+    """The app's LoRA set (its UI slots) back after a protocol call that set
+    its own: before 2026-11-09 a gen with spec.loras left them loaded in the
+    app, and the user's next render inherited them. Restored even when the
+    render fails; hot-swapped back on the app's next run."""
+    import cz_pipeline
+    if not hasattr(cz_pipeline, "LORAS"):
+        yield
+        return
+    old = list(cz_pipeline.LORAS)
+    try:
+        yield
+    finally:
+        if list(cz_pipeline.LORAS) != old:
+            cz_pipeline.LORAS = old
+            _log("protocol: the app's LoRAs are back ("
+                 + (", ".join(f"{os.path.basename(str(p))}@{w}" for p, w in old)
+                    or "none") + "), applied on its next run")
+
+
 def run_gen(spec, warnings=None, route="local"):
+    """Generate ONE image from a VALIDATED spec, with spec.guidance (if any)
+    as the CFG and spec.loras (if any) as the LoRAs of this call only. See
+    _run_gen."""
+    warnings = list(warnings or [])
+    with _call_guidance(spec, warnings) as g, _keep_app_loras():
+        res = _run_gen(spec, warnings, route)
+    if g is not None:
+        res["guidance"] = g
+    return res
+
+
+def _run_gen(spec, warnings=None, route="local"):
     """Generate ONE image from a VALIDATED spec. Loads the pipeline when
     needed (cold path) - never call this while an instance is rendering on
     the same GPU: that is what the remote route is for."""
@@ -560,28 +673,21 @@ def run_gen(spec, warnings=None, route="local"):
     if not spec["prompt"]:
         raise SpecError("prompt contained only <lora:...> tags - describe "
                         "the image too")
-    slots = []
-    for s in spec.get("loras") or []:
-        head, _, tail = str(s).rpartition(":")
-        try:
-            slots.append((head, float(tail)))
-        except ValueError:
-            slots.append((str(s), cz_pipeline.LORA_WEIGHT))
     refs = spec.get("refs") or []
     if refs and hasattr(cz_pipeline, "set_edit_loras"):
         # omni/edit route: the LoRAs go on the EDIT pipe (a set separate from
         # the base one), and a cz_edit_loras preset name is resolved there
         # (downloaded on demand). Without loras -> the edit set is empty for
         # this call (the spec stands alone: the UI's presets do not reach it).
-        cz_pipeline.set_edit_loras(slots)
+        cz_pipeline.set_edit_loras(_lora_slots(spec, resolve_drafts=False))
         cz_pipeline.set_edit_loras_enabled(True)
-    elif slots:
+    else:
         # Base, or the pipeline of a family tool with no edit set
         # (cz_protocol.py is shared): the old behaviour, with a warning.
-        if refs:
+        if refs and spec.get("loras"):
             warnings.append("loras applied on the base pipe (this pipeline "
                             "has no edit LoRA set)")
-        cz_pipeline.set_loras(slots)
+        _apply_spec_loras(spec)
     steps = spec.get("steps") or int(CONFIG.get("default_gen_steps", 8))
     refs = spec.get("refs") or []
     if refs:
@@ -679,6 +785,17 @@ def _pick_esrgan(models, factor):
 
 
 def run_upscale(spec, warnings=None, route="local"):
+    """Upscale / img2img ONE image, with spec.guidance and spec.loras (if any)
+    for this call only. See _run_upscale."""
+    warnings = list(warnings or [])
+    with _call_guidance(spec, warnings) as g, _keep_app_loras():
+        res = _run_upscale(spec, warnings, route)
+    if g is not None:
+        res["guidance"] = g
+    return res
+
+
+def _run_upscale(spec, warnings=None, route="local"):
     """Upscale ONE image (ESRGAN + refine, the tool's pipeline) from a VALID
     spec. The family's print output: comic panels generated at ~1 MP come up
     to print resolution through here. The prompt (optional) guides the refine
@@ -719,12 +836,25 @@ def run_upscale(spec, warnings=None, route="local"):
     from cz_prompt import resolve_seed
     seed_used = resolve_seed(spec.get("seed", -1))
     spec = _expand_spec(spec, seed_used)
+    _apply_spec_loras(spec)           # the refine pass runs on the base pipe
     with Image.open(spec["input"]) as im:
+        iw, ih = im.size
+        # A variation (factor <= 1) is an img2img at the image's own size: it runs on
+        # the WHOLE image with the requested denoise and prompt, up to the size MOSS
+        # renders in one pass. The tile rules (per-tile denoise cap, empty prompt per
+        # tile) exist for upscales to 4K+; applied to a 1088x1920 variation they made
+        # every denoise 0.40 and dropped the prompt, in silence (crispz-motion lot 2).
+        whole = not do_esrgan and iw * ih <= VARIATION_WHOLE_MAX_PX
+        kw = {"auto_tile": False, "refine_tile": 0} if whole else {}
+        rw, rh = (iw, ih) if not do_esrgan else (round(iw * factor), round(ih * factor))
+        notes = getattr(cz_pipeline, "refine_tiling_notes", None)
+        if notes is not None and not whole:
+            warnings += notes(rw, rh, denoise, spec.get("prompt", ""))
         img, timings = cz_pipeline.process_one(
             im.convert("RGB"), model, factor, denoise,
             steps, spec.get("prompt", ""), seed_used,
             int(CONFIG.get("default_tile", 0)),
-            int(CONFIG.get("default_overlap", 16)), do_esrgan=do_esrgan)
+            int(CONFIG.get("default_overlap", 16)), do_esrgan=do_esrgan, **kw)
     path = build_output_path(None, "local", spec.get("out_dir"), "png",
                              tag="czp_upscale", seed=seed_used,
                              size=img.size)
@@ -774,6 +904,17 @@ def handle_edit_json(spec_json):
 
 
 def run_inpaint(spec, warnings=None, route="local"):
+    """Inpaint ONE image, with spec.guidance and spec.loras (if any) for this
+    call only. See _run_inpaint."""
+    warnings = list(warnings or [])
+    with _call_guidance(spec, warnings) as g, _keep_app_loras():
+        res = _run_inpaint(spec, warnings, route)
+    if g is not None:
+        res["guidance"] = g
+    return res
+
+
+def _run_inpaint(spec, warnings=None, route="local"):
     """Inpaint ONE image from a VALID spec: the WHITE area of the mask is
     redrawn from the prompt (the tool's inpaint pipeline, the same code as the
     Inpaint tab). The prompt describes what must appear IN the area (a local
@@ -797,6 +938,7 @@ def run_inpaint(spec, warnings=None, route="local"):
         seed_used = random.randint(0, 2**31 - 1)
     cz_pipeline._LAST_SEED = seed_used
     spec = _expand_spec(spec, seed_used)        # {a|b|c} + wildcards, then LoRA tags
+    _apply_spec_loras(spec)
     with Image.open(spec["input"]) as im, Image.open(spec["mask"]) as mk:
         bg = im.convert("RGB")
         mask = mk.convert("L")

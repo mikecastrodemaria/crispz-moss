@@ -11,8 +11,7 @@ attached. The other crispz studios stay better at photos and editing.
 > RTX 5090: the engine and the single-file loaders, the layout editor, the magic prompt
 > and Describe, the emulated img2img / inpaint / outpaint, LoRAs and editing with
 > references, the local tools and the hand-overs, the GPU end-to-end test and this
-> documentation. The specification and the work log (every measurement, every decision)
-> are in `CLAUDE.md`.
+> documentation.
 
 ## Licence: read this first
 
@@ -308,7 +307,15 @@ styles and prompt ideas, not for a client deliverable.
 
 `python app.py --help`, the cheat sheet in [README_CLI.md](README_CLI.md), and the
 family protocol: `czp caps` / `czp gen --spec spec.json` (routes to the running app,
-else runs locally). `caps` says what is emulated (`supports.emulated`).
+else runs locally). `caps` says what is emulated (`supports.emulated`). A spec may
+carry `guidance` on every op (`gen`, `upscale`, `inpaint`, `edit`): it is the CFG of
+that call only, the app's slider is restored after it and the log says so
+(`supports.guidance`). `loras` works the same way on `gen`, `upscale` and `inpaint`:
+the LoRAs of that call, the app's own slots back afterwards; a draft preset name
+(`moss-turbo-4-steps`, `moss-turbo-3-steps`, `moss-dmd-8-steps`) resolves to its file
+like the Performance preset (downloaded once if absent). A spec without `loras` renders
+with the app's slots. This is how a caller such as crispz-motion renders with the Turbo
+LoRA at CFG 1 while the app stays on its own preset.
 
 ## Tests
 
@@ -334,4 +341,4 @@ OpenMOSS for MOSS-Image and its pipeline (Apache 2.0, vendored in
 VAE); hide1 for the MOSS-Image Character Catalog (MIT for the data; the characters are
 third-party IP); diffusers and transformers; vtracer (MIT); rembg (MIT); the crispz family
 (crispz-klein, crispz-flux3, crispz-ideogram) this studio is forked from. How and why:
-[FORK.md](FORK.md); the full work log: [CLAUDE.md](CLAUDE.md).
+[FORK.md](FORK.md).

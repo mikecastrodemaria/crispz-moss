@@ -5507,9 +5507,32 @@ def _refine_tiled(pipe, image, denoise, steps, prompt, seed, tile, overlap):
 # run emits gr.Error for the UI).
 # ----------------------------------------------------------------------------
 @_gpu_serial
+def refine_tiling_notes(w, h, denoise, prompt, auto_tile=True, refine_tile=None):
+    """What the refine of a w x h image will change behind the caller's back: when it
+    runs in tiles, the per-tile denoise cap and the per-tile prompt. One sentence per
+    change, [] when the refine runs on the whole image or changes nothing. The protocol
+    puts these in its answer's warnings (a degradation is never silent)."""
+    rt = int(DEFAULT_REFINE_TILE if refine_tile is None else refine_tile)
+    tiled = rt > 0 or (auto_tile and max(w, h) > _AUTO_TILE_ABOVE)
+    if not tiled or float(denoise) <= 0.001:
+        return []
+    if rt <= 0:
+        rt = _pick_refine_tile(w, h, int(DEFAULT_REFINE_OVERLAP) or 64)
+    if w <= rt and h <= rt:
+        return []
+    notes = [f"refine of {w}x{h} runs in tiles of {rt}px"]
+    if _TILE_DENOISE_CAP > 0 and float(denoise) > _TILE_DENOISE_CAP:
+        notes.append(f"denoise {float(denoise):.2f} lowered to {_TILE_DENOISE_CAP:.2f} per "
+                     f"tile (refine_tile_denoise_cap)")
+    if (prompt or "").strip() and _tile_prompt(prompt) != prompt:
+        notes.append("the prompt is not used per tile (refine_tile_prompt)")
+    return notes
+
+
 def process_one(image, esrgan_model, factor, denoise, steps, prompt, seed, tile, overlap,
                 refine_tile=DEFAULT_REFINE_TILE, refine_overlap=DEFAULT_REFINE_OVERLAP,
-                do_esrgan=True, refine_first=False, apply_force_ratio=False):
+                do_esrgan=True, refine_first=False, apply_force_ratio=False,
+                auto_tile=True):
     """Pipeline over one PIL Image, returns (image, timings_dict).
     do_esrgan=False -> pure img2img (skips the ESRGAN stage, refines the native image).
     refine_first=True -> refine THEN ESRGAN (the diffusion runs at the native resolution =
@@ -5517,6 +5540,8 @@ def process_one(image, esrgan_model, factor, denoise, steps, prompt, seed, tile,
     apply_force_ratio=True + FORCE_RATIO set -> brings the INPUT to the chosen ratio before
     processing: FORCE_RATIO_MODE 'crop' = a center crop (Fooocus-style), 'extend' =
     outpaints the missing bands (nothing is lost). Otherwise: the native ratio is preserved.
+auto_tile=False -> a whole-image refine stays whole whatever its size (the protocol's
+    variation, factor 1: the requested denoise and prompt, not the tile rules).
 """
     timings = {"esrgan": 0.0, "refine": 0.0}
     image = image.convert("RGB")
@@ -5562,7 +5587,7 @@ def process_one(image, esrgan_model, factor, denoise, steps, prompt, seed, tile,
         rw, rh = img.size
         rt = int(refine_tile)
         # Anti-crash guard rail: a whole-image refine that is too large (4K+) -> auto-tiling.
-        if rt <= 0 and max(rw, rh) > _AUTO_TILE_ABOVE:
+        if rt <= 0 and auto_tile and max(rw, rh) > _AUTO_TILE_ABOVE:
             rt = _pick_refine_tile(rw, rh, int(refine_overlap) or 64)
             _log(f"refine: image {rw}x{rh} > {_AUTO_TILE_ABOVE}px -> auto-tiling (tile {rt}) "
                  "to avoid the VRAM spike (rules: auto_refine_tile_above, auto_refine_tile)")
